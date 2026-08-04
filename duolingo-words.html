@@ -2359,41 +2359,21 @@ document.getElementById('wordInput').addEventListener('input', function(e) {
 
 // ============================================
 // 中文反查：输入中文，找出对应的英文单词
+// 方案：本地 mini-reverse-dict.json（396KB）→ MyMemory API 后备
 // ============================================
-let reverseChunkCache = {};
+let miniReverseDict = null;
 
-async function loadReverseChunk(firstCharCode) {
-    // 按 Unicode 码点均匀分 26 片
-    const charStart = 0x4E00;
-    const charEnd = 0x9FFF + 1;
-    const chunkSize = Math.ceil((charEnd - charStart) / 26);
-    let idx = Math.floor((firstCharCode - charStart) / chunkSize);
-    if (idx < 0 || idx >= 26) idx = 25;
-    const letter = String.fromCharCode(97 + idx); // 'a' + idx
-
-    if (reverseChunkCache[letter]) return reverseChunkCache[letter];
-
+async function loadMiniReverseDict() {
+    if (miniReverseDict) return miniReverseDict;
     try {
-        const resp = await fetch('./dict-reverse/rev-' + letter + '.json');
+        const resp = await fetch('./mini-reverse-dict.json');
         if (resp.ok) {
-            const raw = await resp.json();
-            // 新格式: 扁平数组 [key1, [words], key2, [words], ...]
-            // 转为 Map 便于查询
-            const map = {};
-            if (Array.isArray(raw)) {
-                for (let i = 0; i + 1 < raw.length; i += 2) {
-                    map[raw[i]] = raw[i + 1];
-                }
-            } else {
-                // 兼容旧格式
-                Object.assign(map, raw);
-            }
-            reverseChunkCache[letter] = map;
-            console.log('[反查] 已加载分片 [' + letter + ']:', Object.keys(map).length, '个关键词');
-            return map;
+            miniReverseDict = await resp.json();
+            console.log('[反查] 迷你反查词典已加载:', Object.keys(miniReverseDict).length, '个词条');
+            return miniReverseDict;
         }
     } catch (e) {
-        console.log('[反查] 加载分片失败:', e);
+        console.log('[反查] 迷你反查词典加载失败:', e);
     }
     return null;
 }
@@ -2405,63 +2385,68 @@ async function lookupByChinese(query) {
     dictLookupController = new AbortController();
     const signal = dictLookupController.signal;
 
-    showDictHint('loading', '正在翻译 "' + query + '"...');
+    showDictHint('loading', '正在查找 "' + query + '"...');
 
     try {
-        // 用 MyMemory API 直接中英翻译，加 10 秒超时
-        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 10000));
-        const url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(query) + '&langpair=zh|en';
-        const resp = await Promise.race([fetch(url, { signal }), timeout]);
-        if (!resp.ok) {
-            showDictHint('error', '翻译服务不可用');
-            return;
-        }
+        // 阶段1: 查本地迷你反查词典（即时返回）
+        const dict = await loadMiniReverseDict();
+        let results = [];
 
-        const data = await resp.json();
-        if (!data || !data.responseData || !data.responseData.translatedText) {
-            showDictHint('error', '翻译失败');
-            return;
-        }
+        if (dict) {
+            // 精确匹配
+            if (dict[query]) {
+                for (const w of dict[query]) {
+                    results.push({ word: w, translation: query, phonetic: '' });
+                }
+            }
 
-        const englishTranslation = data.responseData.translatedText.trim();
-        console.log('[反查] MyMemory 翻译:', query, '->', englishTranslation);
-
-        // 提取英文单词
-        const words = englishTranslation.split(/[\s,;]+/).filter(w => /^[a-zA-Z]/.test(w) && w.length >= 2);
-
-        // 也检查 matches
-        let matchWords = [];
-        if (data.matches && Array.isArray(data.matches)) {
-            for (const m of data.matches) {
-                if (m.translation) {
-                    const mWords = m.translation.split(/[\s,;]+/).filter(w => /^[a-zA-Z]/.test(w) && w.length >= 2);
-                    matchWords.push(...mWords);
+            // 模糊匹配（包含关系）
+            if (results.length < 3) {
+                for (const [kw, words] of Object.entries(dict)) {
+                    if (kw !== query && (kw.includes(query) || query.includes(kw))) {
+                        for (const w of words) {
+                            if (!results.find(r => r.word === w)) {
+                                results.push({ word: w, translation: kw, phonetic: '' });
+                            }
+                        }
+                        if (results.length >= 5) break;
+                    }
                 }
             }
         }
 
-        // 合并去重，转小写
-        const allWords = [...new Set([...words, ...matchWords].map(w => w.toLowerCase()))].slice(0, 5);
+        if (results.length > 0) {
+            showChineseSearchResult(results);
+            return;
+        }
 
-        if (allWords.length === 0) {
+        // 阶段2: 本地词典没找到，尝试 MyMemory API
+        showDictHint('loading', '正在翻译 "' + query + '"...');
+        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 8000));
+        const url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(query) + '&langpair=zh|en';
+        const resp = await Promise.race([fetch(url, { signal }), timeout]);
+        if (!resp.ok) {
             showDictHint('error', '未找到对应的英文单词');
             return;
         }
 
-        // 直接显示结果，不再逐个查词典（太慢）
-        const results = allWords.map(w => ({
-            word: w,
-            translation: query,
-            phonetic: ''
-        }));
+        const data = await resp.json();
+        const en = (data.responseData && data.responseData.translatedText) || '';
+        const words = en.split(/[\s,;]+/).filter(w => /^[a-zA-Z]/.test(w) && w.length >= 2).map(w => w.toLowerCase());
 
+        if (words.length === 0) {
+            showDictHint('error', '未找到对应的英文单词');
+            return;
+        }
+
+        results = words.slice(0, 5).map(w => ({ word: w, translation: query, phonetic: '' }));
         showChineseSearchResult(results);
     } catch (err) {
         if (err.name !== 'AbortError') {
             if (err.message === 'timeout') {
                 showDictHint('error', '翻译超时，请重试');
             } else {
-                showDictHint('error', '反查失败，请稍后重试');
+                showDictHint('error', '查找失败，请稍后重试');
             }
         }
     }
@@ -2735,8 +2720,8 @@ async function getDictStats() {
     });
 }
 
-// 页面加载时预载常用词典
-window.addEventListener('load', () => { loadEmbeddedDict(); });
+// 页面加载时预载常用词典和反查词典
+window.addEventListener('load', () => { loadEmbeddedDict(); loadMiniReverseDict(); });
 
 // 检测是否在本地环境（有本地代理服务器）
 const IS_LOCAL = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
