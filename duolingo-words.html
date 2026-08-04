@@ -2387,14 +2387,44 @@ async function lookupWord(word) {
     }
 }
 
+// ============================================
+// 内嵌词典（离线优先：先查本地，再查 API）
+// ============================================
+let embeddedDict = null;
+
+async function loadEmbeddedDict() {
+    if (embeddedDict) return embeddedDict;
+    try {
+        const resp = await fetch('./dict-data.json');
+        if (resp.ok) {
+            embeddedDict = await resp.json();
+            console.log('[词典] 内嵌词典已加载，共', Object.keys(embeddedDict).length, '个词');
+        }
+    } catch (e) {
+        console.log('[词典] 内嵌词典加载失败，将使用在线 API');
+    }
+    return embeddedDict;
+}
+
+// 页面加载时预载内嵌词典
+window.addEventListener('load', () => { loadEmbeddedDict(); });
+
 // 检测是否在本地环境（有本地代理服务器）
 const IS_LOCAL = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
 // CORS 代理（用于线上环境访问不支持 CORS 的 API）
 const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
 
-// 中文翻译（本地代理 → MyMemory 句子翻译 / 线上直接调用）
+// 中文翻译（内嵌词典 → 本地代理 → 线上 API）
 async function fetchTranslate(word, signal) {
+    // 1. 先查内嵌词典（离线即时返回）
+    await loadEmbeddedDict();
+    if (embeddedDict) {
+        const local = embeddedDict[word.toLowerCase()];
+        if (local) return { translation: local };
+    }
+
+    // 2. 再查在线 API
     if (IS_LOCAL) {
         // 本地：通过代理服务器
         try {

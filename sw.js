@@ -4,9 +4,10 @@
 // 策略：HTML 页面 network-first，其他资源 cache-first
 // ============================================
 
-const CACHE_NAME = 'duo-words-v8';
+const CACHE_NAME = 'duo-words-v9';
 const CORE_ASSETS = [
     './duolingo-words.html',
+    './dict-data.json',
     './manifest.json',
     './icon.svg',
     './icon-maskable.svg'
