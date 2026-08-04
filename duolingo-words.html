@@ -2405,37 +2405,49 @@ async function lookupByChinese(query) {
     dictLookupController = new AbortController();
     const signal = dictLookupController.signal;
 
-    showDictHint('loading', '正在反查中文 "' + query + '"...');
+    showDictHint('loading', '正在翻译 "' + query + '"...');
 
     try {
-        const firstCharCode = query.charCodeAt(0);
-        const chunk = await loadReverseChunk(firstCharCode);
-        if (!chunk) {
-            showDictHint('error', '反查索引加载失败');
+        // 用 MyMemory API 直接中英翻译
+        const url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(query) + '&langpair=zh|en';
+        const resp = await fetch(url, { signal });
+        if (!resp.ok) {
+            showDictHint('error', '翻译服务不可用');
             return;
         }
 
-        // 精确匹配 + 模糊匹配
-        const exact = [];
-        const fuzzy = [];
+        const data = await resp.json();
+        if (!data || !data.responseData || !data.responseData.translatedText) {
+            showDictHint('error', '翻译失败');
+            return;
+        }
 
-        for (const [kw, words] of Object.entries(chunk)) {
-            if (kw === query) {
-                exact.push(...words);
-            } else if (kw.includes(query) || query.includes(kw)) {
-                fuzzy.push(...words);
+        const englishTranslation = data.responseData.translatedText.trim();
+        console.log('[反查] MyMemory 翻译:', query, '->', englishTranslation);
+
+        // 提取英文单词（可能返回一个词或一个短语）
+        const words = englishTranslation.split(/[\s,;]+/).filter(w => /^[a-zA-Z]/.test(w) && w.length >= 2);
+
+        // 也检查 matches（MyMemory 可能返回多个翻译）
+        let matches = [];
+        if (data.matches && Array.isArray(data.matches)) {
+            for (const m of data.matches) {
+                if (m.translation) {
+                    const mWords = m.translation.split(/[\s,;]+/).filter(w => /^[a-zA-Z]/.test(w) && w.length >= 2);
+                    matches.push(...mWords);
+                }
             }
         }
 
-        // 去重
-        const allWords = [...new Set([...exact, ...fuzzy])].slice(0, 10);
+        // 合并去重
+        const allWords = [...new Set([...words, ...matches])].slice(0, 5);
 
         if (allWords.length === 0) {
-            showDictHint('error', '未找到包含"' + query + '"的英文单词');
+            showDictHint('error', '未找到对应的英文单词');
             return;
         }
 
-        // 查询每个英文单词的翻译
+        // 查询每个英文单词的详细信息
         const results = [];
         for (const w of allWords.slice(0, 5)) {
             const transResult = await fetchTranslate(w, signal);
@@ -2445,11 +2457,18 @@ async function lookupByChinese(query) {
                     translation: transResult.translation,
                     phonetic: transResult.phonetic || ''
                 });
+            } else {
+                // 即使词典没查到，也显示翻译结果
+                results.push({
+                    word: w,
+                    translation: query,
+                    phonetic: ''
+                });
             }
         }
 
         if (results.length === 0) {
-            showDictHint('error', '找到单词但无法获取翻译');
+            showDictHint('error', '无法获取单词信息');
             return;
         }
 
