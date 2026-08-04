@@ -1,9 +1,10 @@
 // ============================================
 // Service Worker - 多邻国生词收集器
 // 功能：离线缓存 + 资源回退
+// 策略：HTML 页面 network-first，其他资源 cache-first
 // ============================================
 
-const CACHE_NAME = 'duo-words-v2';
+const CACHE_NAME = 'duo-words-v8';
 const CORE_ASSETS = [
     './duolingo-words.html',
     './manifest.json',
@@ -31,7 +32,7 @@ self.addEventListener('activate', (event) => {
     );
 });
 
-// 请求拦截：缓存优先，网络回退
+// 请求拦截
 self.addEventListener('fetch', (event) => {
     const req = event.request;
 
@@ -42,24 +43,43 @@ self.addEventListener('fetch', (event) => {
     const url = new URL(req.url);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
 
-    event.respondWith(
-        caches.match(req).then((cached) => {
-            if (cached) return cached;
+    // 跨域请求（如词典 API）不经过 Service Worker，直接由浏览器处理
+    if (url.origin !== self.location.origin) return;
 
-            return fetch(req)
+    // HTML 导航请求：network-first，确保总是获取最新版本
+    if (req.mode === 'navigate') {
+        event.respondWith(
+            fetch(req)
                 .then((resp) => {
-                    // 只缓存有效的同源响应
-                    if (resp && resp.ok && url.origin === self.location.origin) {
+                    if (resp && resp.ok) {
                         const clone = resp.clone();
                         caches.open(CACHE_NAME).then((cache) => cache.put(req, clone));
                     }
                     return resp;
                 })
                 .catch(() => {
-                    // 离线时回退到主页
-                    if (req.mode === 'navigate') {
-                        return caches.match('./duolingo-words.html');
+                    return caches.match('./duolingo-words.html');
+                })
+        );
+        return;
+    }
+
+    // 其他同源资源：cache-first
+    event.respondWith(
+        caches.match(req).then((cached) => {
+            if (cached) return cached;
+
+            return fetch(req)
+                .then((resp) => {
+                    if (resp && resp.ok) {
+                        const clone = resp.clone();
+                        caches.open(CACHE_NAME).then((cache) => cache.put(req, clone));
                     }
+                    return resp;
+                })
+                .catch(() => {
+                    // 离线时尝试缓存回退
+                    return caches.match(req);
                 });
         })
     );
