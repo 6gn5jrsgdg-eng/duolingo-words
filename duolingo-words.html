@@ -1,0 +1,2024 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多邻国生词收集器</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#58cc02">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="生词本">
+    <link rel="apple-touch-icon" href="icon.svg">
+    <link rel="icon" type="image/svg+xml" href="icon.svg">
+    <style>
+        /* ===== 全局变量 ===== */
+        :root {
+            --duo-green: #58cc02;
+            --duo-green-dark: #46a302;
+            --duo-green-light: #d7ffb8;
+            --duo-blue: #1cb0f6;
+            --duo-blue-light: #ddf4ff;
+            --duo-red: #ff4b4b;
+            --duo-red-light: #ffdfe0;
+            --duo-yellow: #ffc800;
+            --duo-yellow-light: #fff4cc;
+            --duo-purple: #ce82ff;
+            --duo-purple-light: #f5e6ff;
+            --duo-gray: #afafaf;
+            --duo-gray-light: #f7f7f7;
+            --duo-text: #3c3c3c;
+            --duo-text-light: #777777;
+            --duo-bg: #ffffff;
+            --duo-border: #e5e5e5;
+            --duo-shadow: 0 2px 0 rgba(0,0,0,0.05);
+            --duo-radius: 16px;
+            --duo-radius-sm: 12px;
+        }
+
+        /* ===== 重置 ===== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Nunito', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: var(--duo-gray-light);
+            color: var(--duo-text);
+            min-height: 100vh;
+            padding-bottom: 80px;
+        }
+
+        /* ===== 头部 ===== */
+        header {
+            background: var(--duo-bg);
+            padding: 16px 20px;
+            box-shadow: var(--duo-shadow);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: var(--duo-green);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+            font-weight: 900;
+        }
+
+        .logo h1 {
+            font-size: 20px;
+            font-weight: 800;
+            color: var(--duo-text);
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .icon-btn {
+            width: 38px;
+            height: 38px;
+            border: 2px solid var(--duo-border);
+            border-radius: 10px;
+            background: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            transition: all 0.15s;
+        }
+
+        .icon-btn:hover {
+            background: var(--duo-gray-light);
+            border-color: var(--duo-gray);
+        }
+
+        /* ===== 主内容区 ===== */
+        main {
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 20px 16px;
+        }
+
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ===== 卡片 ===== */
+        .card {
+            background: white;
+            border-radius: var(--duo-radius);
+            border: 2px solid var(--duo-border);
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+
+        .card-title {
+            font-size: 18px;
+            font-weight: 800;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* ===== 输入框 ===== */
+        .input-group {
+            margin-bottom: 14px;
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--duo-text-light);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .input-group input,
+        .input-group textarea {
+            width: 100%;
+            border: 2px solid var(--duo-border);
+            border-radius: var(--duo-radius-sm);
+            padding: 12px 14px;
+            font-size: 16px;
+            font-family: inherit;
+            transition: border-color 0.15s;
+            background: white;
+        }
+
+        .input-group input:focus,
+        .input-group textarea:focus {
+            outline: none;
+            border-color: var(--duo-blue);
+        }
+
+        .input-group textarea {
+            resize: vertical;
+            min-height: 60px;
+        }
+
+        .label-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .label-row label {
+            margin-bottom: 0;
+        }
+
+        .quick-paste-link {
+            background: none;
+            border: none;
+            color: var(--duo-blue);
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            font-family: inherit;
+            padding: 0;
+        }
+
+        .quick-paste-link:hover {
+            text-decoration: underline;
+        }
+
+        /* ===== 按钮 ===== */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 12px 24px;
+            border: none;
+            border-radius: var(--duo-radius-sm);
+            font-size: 15px;
+            font-weight: 800;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.1s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn:active {
+            transform: translateY(2px);
+        }
+
+        .btn-primary {
+            background: var(--duo-green);
+            color: white;
+            box-shadow: 0 4px 0 var(--duo-green-dark);
+        }
+
+        .btn-primary:active {
+            box-shadow: 0 2px 0 var(--duo-green-dark);
+        }
+
+        .btn-blue {
+            background: var(--duo-blue);
+            color: white;
+            box-shadow: 0 4px 0 #1899d6;
+        }
+
+        .btn-blue:active {
+            box-shadow: 0 2px 0 #1899d6;
+        }
+
+        .btn-outline {
+            background: white;
+            color: var(--duo-text);
+            border: 2px solid var(--duo-border);
+            box-shadow: 0 4px 0 var(--duo-border);
+        }
+
+        .btn-outline:active {
+            box-shadow: 0 2px 0 var(--duo-border);
+        }
+
+        .btn-danger {
+            background: var(--duo-red);
+            color: white;
+            box-shadow: 0 4px 0 #e03b3b;
+        }
+
+        .btn-full {
+            width: 100%;
+        }
+
+        .btn-sm {
+            padding: 8px 14px;
+            font-size: 13px;
+        }
+
+        /* ===== 单词卡片 ===== */
+        .word-card {
+            background: white;
+            border-radius: var(--duo-radius);
+            border: 2px solid var(--duo-border);
+            padding: 16px;
+            margin-bottom: 12px;
+            transition: all 0.2s;
+            position: relative;
+        }
+
+        .word-card:hover {
+            border-color: var(--duo-gray);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+        }
+
+        .word-card.mastered {
+            border-color: var(--duo-green);
+            background: #fafff5;
+        }
+
+        .word-card.learning {
+            border-color: var(--duo-yellow);
+            background: #fffdf5;
+        }
+
+        .word-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 8px;
+        }
+
+        .word-text {
+            font-size: 22px;
+            font-weight: 800;
+            color: var(--duo-text);
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .speak-btn {
+            background: var(--duo-blue-light);
+            border: none;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+            flex-shrink: 0;
+        }
+
+        .speak-btn:hover {
+            background: var(--duo-blue);
+            transform: scale(1.1);
+        }
+
+        .speak-btn:active {
+            transform: scale(0.95);
+        }
+
+        .flashcard-speak {
+            background: white;
+            border: 2px solid var(--duo-green);
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 16px;
+            transition: all 0.15s;
+        }
+
+        .flashcard-speak:hover {
+            background: var(--duo-green-light);
+            transform: scale(1.1);
+        }
+
+        .word-translation {
+            font-size: 16px;
+            color: var(--duo-text-light);
+            margin-top: 4px;
+            font-weight: 600;
+        }
+
+        .word-example {
+            font-size: 14px;
+            color: var(--duo-text-light);
+            margin-top: 8px;
+            padding: 8px 12px;
+            background: var(--duo-gray-light);
+            border-radius: 8px;
+            font-style: italic;
+        }
+
+        .word-notes {
+            font-size: 13px;
+            color: var(--duo-text-light);
+            margin-top: 6px;
+        }
+
+        .word-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--duo-border);
+        }
+
+        .word-date {
+            font-size: 12px;
+            color: var(--duo-gray);
+        }
+
+        .word-actions {
+            display: flex;
+            gap: 6px;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .status-new {
+            background: var(--duo-blue-light);
+            color: var(--duo-blue);
+        }
+
+        .status-learning {
+            background: var(--duo-yellow-light);
+            color: #b08600;
+        }
+
+        .status-mastered {
+            background: var(--duo-green-light);
+            color: var(--duo-green-dark);
+        }
+
+        .mini-btn {
+            padding: 5px 10px;
+            border: 2px solid var(--duo-border);
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 700;
+            transition: all 0.15s;
+            font-family: inherit;
+        }
+
+        .mini-btn:hover {
+            background: var(--duo-gray-light);
+        }
+
+        .mini-btn.green:hover {
+            background: var(--duo-green-light);
+            border-color: var(--duo-green);
+            color: var(--duo-green-dark);
+        }
+
+        .mini-btn.red:hover {
+            background: var(--duo-red-light);
+            border-color: var(--duo-red);
+            color: var(--duo-red);
+        }
+
+        /* ===== 底部导航 ===== */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            border-top: 2px solid var(--duo-border);
+            display: flex;
+            justify-content: space-around;
+            padding: 8px 0;
+            z-index: 100;
+            max-width: 720px;
+            margin: 0 auto;
+        }
+
+        .nav-item {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+            padding: 6px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-family: inherit;
+            transition: all 0.15s;
+            border-radius: 10px;
+            margin: 0 4px;
+        }
+
+        .nav-item .nav-icon {
+            font-size: 24px;
+        }
+
+        .nav-item .nav-label {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--duo-gray);
+        }
+
+        .nav-item.active .nav-icon,
+        .nav-item.active .nav-label {
+            color: var(--duo-blue);
+        }
+
+        /* ===== 空状态 ===== */
+        .empty-state {
+            text-align: center;
+            padding: 48px 20px;
+            color: var(--duo-gray);
+        }
+
+        .empty-state .empty-icon {
+            font-size: 56px;
+            margin-bottom: 12px;
+        }
+
+        .empty-state p {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        /* ===== 统计 ===== */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: var(--duo-radius);
+            border: 2px solid var(--duo-border);
+            padding: 20px;
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 36px;
+            font-weight: 900;
+        }
+
+        .stat-label {
+            font-size: 13px;
+            color: var(--duo-text-light);
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-top: 4px;
+        }
+
+        .stat-green .stat-number { color: var(--duo-green); }
+        .stat-blue .stat-number { color: var(--duo-blue); }
+        .stat-yellow .stat-number { color: var(--duo-yellow); }
+        .stat-red .stat-number { color: var(--duo-red); }
+
+        /* ===== 图表 ===== */
+        .chart-container {
+            background: white;
+            border-radius: var(--duo-radius);
+            border: 2px solid var(--duo-border);
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+
+        .chart-title {
+            font-size: 15px;
+            font-weight: 800;
+            margin-bottom: 16px;
+        }
+
+        .bar-chart {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            height: 140px;
+            gap: 6px;
+            padding-top: 20px;
+        }
+
+        .bar-item {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            height: 100%;
+            justify-content: flex-end;
+        }
+
+        .bar {
+            width: 100%;
+            max-width: 40px;
+            background: var(--duo-green);
+            border-radius: 6px 6px 0 0;
+            min-height: 4px;
+            transition: height 0.5s ease;
+            position: relative;
+        }
+
+        .bar-count {
+            position: absolute;
+            top: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--duo-text);
+        }
+
+        .bar-label {
+            font-size: 11px;
+            color: var(--duo-gray);
+            font-weight: 600;
+        }
+
+        /* ===== 进度环 ===== */
+        .progress-ring-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .progress-ring {
+            position: relative;
+            width: 120px;
+            height: 120px;
+        }
+
+        .progress-ring svg {
+            transform: rotate(-90deg);
+        }
+
+        .progress-ring-bg {
+            stroke: var(--duo-border);
+            stroke-width: 10;
+            fill: none;
+        }
+
+        .progress-ring-fill {
+            stroke: var(--duo-green);
+            stroke-width: 10;
+            fill: none;
+            stroke-linecap: round;
+            transition: stroke-dashoffset 0.8s ease;
+        }
+
+        .progress-ring-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+        }
+
+        .progress-ring-text .pct {
+            font-size: 24px;
+            font-weight: 900;
+            color: var(--duo-text);
+        }
+
+        .progress-ring-text .lbl {
+            font-size: 11px;
+            color: var(--duo-gray);
+            font-weight: 600;
+        }
+
+        /* ===== 复习模式 ===== */
+        .flashcard {
+            background: white;
+            border-radius: 24px;
+            border: 2px solid var(--duo-border);
+            min-height: 280px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 30px;
+            cursor: pointer;
+            transition: transform 0.4s;
+            transform-style: preserve-3d;
+            position: relative;
+        }
+
+        .flashcard.flipped {
+            background: var(--duo-green-light);
+            border-color: var(--duo-green);
+        }
+
+        .flashcard-word {
+            font-size: 32px;
+            font-weight: 900;
+            margin-bottom: 12px;
+            text-align: center;
+        }
+
+        .flashcard-translation {
+            font-size: 20px;
+            color: var(--duo-text-light);
+            text-align: center;
+            font-weight: 600;
+        }
+
+        .flashcard-example {
+            font-size: 15px;
+            color: var(--duo-text-light);
+            margin-top: 16px;
+            padding: 12px;
+            background: rgba(255,255,255,0.6);
+            border-radius: 12px;
+            text-align: center;
+            font-style: italic;
+        }
+
+        .flashcard-hint {
+            font-size: 12px;
+            color: var(--duo-gray);
+            margin-top: 20px;
+        }
+
+        .review-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .review-progress {
+            text-align: center;
+            margin-bottom: 16px;
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--duo-text-light);
+        }
+
+        .review-dots {
+            display: flex;
+            justify-content: center;
+            gap: 6px;
+            margin-bottom: 16px;
+        }
+
+        .review-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--duo-border);
+        }
+
+        .review-dot.done {
+            background: var(--duo-green);
+        }
+
+        .review-dot.current {
+            background: var(--duo-blue);
+            transform: scale(1.3);
+        }
+
+        /* ===== 搜索和筛选 ===== */
+        .search-bar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .search-bar input {
+            flex: 1;
+            border: 2px solid var(--duo-border);
+            border-radius: var(--duo-radius-sm);
+            padding: 10px 14px;
+            font-size: 15px;
+            font-family: inherit;
+        }
+
+        .search-bar input:focus {
+            outline: none;
+            border-color: var(--duo-blue);
+        }
+
+        .filter-chips {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+
+        .chip {
+            padding: 6px 16px;
+            border-radius: 20px;
+            border: 2px solid var(--duo-border);
+            background: white;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 700;
+            font-family: inherit;
+            transition: all 0.15s;
+        }
+
+        .chip.active {
+            background: var(--duo-blue);
+            color: white;
+            border-color: var(--duo-blue);
+        }
+
+        /* ===== 模态框 ===== */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.4);
+            z-index: 200;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .modal-overlay.show {
+            display: flex;
+        }
+
+        .modal {
+            background: white;
+            border-radius: var(--duo-radius);
+            padding: 24px;
+            max-width: 480px;
+            width: 100%;
+            max-height: 85vh;
+            overflow-y: auto;
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: 800;
+            margin-bottom: 16px;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        /* ===== Toast 提示 ===== */
+        .toast {
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--duo-text);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 700;
+            z-index: 300;
+            opacity: 0;
+            transition: opacity 0.3s, transform 0.3s;
+            pointer-events: none;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(-4px);
+        }
+
+        .toast.success {
+            background: var(--duo-green-dark);
+        }
+
+        .toast.error {
+            background: var(--duo-red);
+        }
+
+        /* ===== 日期分组标题 ===== */
+        .date-group-title {
+            font-size: 14px;
+            font-weight: 800;
+            color: var(--duo-text-light);
+            margin: 20px 0 10px;
+            padding-left: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .date-group-title .count {
+            background: var(--duo-blue-light);
+            color: var(--duo-blue);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 12px;
+        }
+
+        .date-group-title.today {
+            color: var(--duo-green-dark);
+        }
+
+        .date-group-title.today .count {
+            background: var(--duo-green-light);
+            color: var(--duo-green-dark);
+        }
+
+        /* ===== 安装提示横幅 ===== */
+        .install-banner {
+            background: white;
+            border: 2px solid var(--duo-green);
+            border-radius: var(--duo-radius);
+            padding: 14px 16px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .install-banner-text {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+        }
+
+        .install-icon {
+            font-size: 28px;
+        }
+
+        .install-title {
+            font-size: 15px;
+            font-weight: 800;
+            color: var(--duo-text);
+        }
+
+        .install-desc {
+            font-size: 12px;
+            color: var(--duo-text-light);
+            margin-top: 2px;
+        }
+
+        .install-banner-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .install-close {
+            background: none;
+            border: none;
+            color: var(--duo-gray);
+            font-size: 18px;
+            cursor: pointer;
+            padding: 4px 8px;
+        }
+
+        /* ===== 快速添加区 ===== */
+        .quick-add-banner {
+            background: linear-gradient(135deg, var(--duo-green), var(--duo-green-dark));
+            border-radius: var(--duo-radius);
+            padding: 20px;
+            color: white;
+            margin-bottom: 16px;
+        }
+
+        .quick-add-banner h2 {
+            font-size: 20px;
+            font-weight: 900;
+            margin-bottom: 4px;
+        }
+
+        .quick-add-banner p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .today-count {
+            font-size: 48px;
+            font-weight: 900;
+            margin-top: 8px;
+        }
+
+        .today-count small {
+            font-size: 16px;
+            font-weight: 600;
+            opacity: 0.8;
+        }
+
+        /* ===== 响应式 ===== */
+        @media (max-width: 480px) {
+            main { padding: 12px 10px; }
+            .stats-grid { grid-template-columns: 1fr; }
+            .flashcard-word { font-size: 26px; }
+            .word-text { font-size: 18px; }
+        }
+
+        /* ===== 隐藏文件输入 ===== */
+        #importFile { display: none; }
+
+        /* ===== 设置区 ===== */
+        .settings-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 0;
+            border-bottom: 1px solid var(--duo-border);
+        }
+
+        .settings-row:last-child { border-bottom: none; }
+
+        .settings-label {
+            font-size: 15px;
+            font-weight: 600;
+        }
+
+        .settings-desc {
+            font-size: 13px;
+            color: var(--duo-gray);
+            margin-top: 2px;
+        }
+    </style>
+</head>
+<body>
+
+<!-- ===== 头部 ===== -->
+<header>
+    <div class="logo">
+        <div class="logo-icon">D</div>
+        <h1>生词收集器</h1>
+    </div>
+    <div class="header-actions">
+        <button class="icon-btn" onclick="exportData()" title="导出数据">📥</button>
+        <button class="icon-btn" onclick="document.getElementById('importFile').click()" title="导入数据">📤</button>
+        <input type="file" id="importFile" accept=".json" onchange="importData(event)">
+    </div>
+</header>
+
+<!-- ===== 主内容 ===== -->
+<main>
+    <!-- 今日收集 -->
+    <div class="tab-content active" id="tab-today">
+        <div class="install-banner" id="installBanner" style="display:none;">
+            <div class="install-banner-text">
+                <span class="install-icon">📱</span>
+                <div>
+                    <div class="install-title">安装到手机主屏幕</div>
+                    <div class="install-desc">像 App 一样秒开，支持离线使用和分享接收</div>
+                </div>
+            </div>
+            <div class="install-banner-actions">
+                <button class="btn btn-sm btn-primary" id="installBtn">安装</button>
+                <button class="install-close" onclick="dismissInstall()">✕</button>
+            </div>
+        </div>
+        <div class="quick-add-banner">
+            <h2>今日收集</h2>
+            <p>今天还没有不认识的单词？赶紧添加吧！</p>
+            <div class="today-count"><span id="todayCount">0</span><small> 个单词</small></div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">📝 添加新单词</div>
+            <div class="input-group">
+                <div class="label-row">
+                    <label>单词 *</label>
+                    <button class="quick-paste-link" onclick="pasteToWord()">📋 粘贴剪贴板</button>
+                </div>
+                <input type="text" id="wordInput" placeholder="输入不认识的单词" onkeydown="if(event.key==='Enter')document.getElementById('translationInput').focus()">
+            </div>
+            <div class="input-group">
+                <label>释义 *</label>
+                <input type="text" id="translationInput" placeholder="中文翻译/解释" onkeydown="if(event.key==='Enter')addWord()">
+            </div>
+            <div class="input-group">
+                <label>例句（可选）</label>
+                <textarea id="exampleInput" placeholder="包含该单词的例句"></textarea>
+            </div>
+            <div class="input-group">
+                <label>笔记（可选）</label>
+                <input type="text" id="notesInput" placeholder="词性、用法备注等">
+            </div>
+            <button class="btn btn-primary btn-full" onclick="addWord()">➕ 添加单词</button>
+        </div>
+
+        <div id="todayWordsContainer"></div>
+    </div>
+
+    <!-- 单词本 -->
+    <div class="tab-content" id="tab-wordbook">
+        <div class="card">
+            <div class="card-title">📚 单词本</div>
+            <div class="search-bar">
+                <input type="text" id="searchInput" placeholder="搜索单词或释义..." oninput="renderWordbook()">
+            </div>
+            <div class="filter-chips">
+                <button class="chip active" data-filter="all" onclick="setFilter('all')">全部</button>
+                <button class="chip" data-filter="new" onclick="setFilter('new')">🆕 新词</button>
+                <button class="chip" data-filter="learning" onclick="setFilter('learning')">📖 学习中</button>
+                <button class="chip" data-filter="mastered" onclick="setFilter('mastered')">✅ 已掌握</button>
+            </div>
+        </div>
+        <div id="wordbookContainer"></div>
+    </div>
+
+    <!-- 复习 -->
+    <div class="tab-content" id="tab-review">
+        <div id="reviewSetup">
+            <div class="card">
+                <div class="card-title">🧠 复习模式</div>
+                <p style="color:var(--duo-text-light);font-size:14px;margin-bottom:16px;">点击卡片翻转查看释义，标记掌握状态。</p>
+                <div id="reviewStats" style="margin-bottom:16px;"></div>
+                <div class="filter-chips">
+                    <button class="chip active" data-review-filter="new" onclick="setReviewFilter('new')">🆕 新词</button>
+                    <button class="chip" data-review-filter="learning" onclick="setReviewFilter('learning')">📖 学习中</button>
+                    <button class="chip" data-review-filter="all" onclick="setReviewFilter('all')">全部</button>
+                </div>
+                <button class="btn btn-primary btn-full" onclick="startReview()">🚀 开始复习</button>
+            </div>
+        </div>
+
+        <div id="reviewSession" style="display:none;">
+            <div class="review-progress" id="reviewProgress"></div>
+            <div class="review-dots" id="reviewDots"></div>
+            <div class="flashcard" id="flashcard" onclick="flipCard()">
+                <div id="flashcardContent"></div>
+                <div class="flashcard-hint">点击卡片翻转</div>
+            </div>
+            <div class="review-controls">
+                <button class="btn btn-outline" style="flex:1;" onclick="reviewAction('still')">🤔 还没记住</button>
+                <button class="btn btn-primary" style="flex:1;" onclick="reviewAction('gotit')">✅ 记住了</button>
+            </div>
+            <div style="text-align:center;margin-top:12px;">
+                <button class="btn btn-sm btn-outline" onclick="endReview()">退出复习</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 统计 -->
+    <div class="tab-content" id="tab-stats">
+        <div class="stats-grid">
+            <div class="stat-card stat-green">
+                <div class="stat-number" id="statTotal">0</div>
+                <div class="stat-label">总单词数</div>
+            </div>
+            <div class="stat-card stat-blue">
+                <div class="stat-number" id="statNew">0</div>
+                <div class="stat-label">新词</div>
+            </div>
+            <div class="stat-card stat-yellow">
+                <div class="stat-number" id="statLearning">0</div>
+                <div class="stat-label">学习中</div>
+            </div>
+            <div class="stat-card stat-green">
+                <div class="stat-number" id="statMastered">0</div>
+                <div class="stat-label">已掌握</div>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <div class="chart-title">📊 近7天收集趋势</div>
+            <div class="bar-chart" id="weekChart"></div>
+        </div>
+
+        <div class="chart-container">
+            <div class="chart-title">🎯 掌握进度</div>
+            <div class="progress-ring-container">
+                <div class="progress-ring">
+                    <svg width="120" height="120">
+                        <circle class="progress-ring-bg" cx="60" cy="60" r="50"></circle>
+                        <circle class="progress-ring-fill" cx="60" cy="60" r="50" id="progressCircle"
+                            stroke-dasharray="314" stroke-dashoffset="314"></circle>
+                    </svg>
+                    <div class="progress-ring-text">
+                        <div class="pct" id="progressPct">0%</div>
+                        <div class="lbl">掌握率</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">⚙️ 数据管理</div>
+            <div class="settings-row">
+                <div>
+                    <div class="settings-label">导出数据</div>
+                    <div class="settings-desc">保存所有单词为 JSON 文件</div>
+                </div>
+                <button class="btn btn-sm btn-outline" onclick="exportData()">导出</button>
+            </div>
+            <div class="settings-row">
+                <div>
+                    <div class="settings-label">导入数据</div>
+                    <div class="settings-desc">从 JSON 文件恢复单词</div>
+                </div>
+                <button class="btn btn-sm btn-outline" onclick="document.getElementById('importFile').click()">导入</button>
+            </div>
+            <div class="settings-row">
+                <div>
+                    <div class="settings-label" style="color:var(--duo-red);">清空所有数据</div>
+                    <div class="settings-desc">删除全部单词，不可恢复</div>
+                </div>
+                <button class="btn btn-sm btn-danger" onclick="clearAllData()">清空</button>
+            </div>
+        </div>
+    </div>
+</main>
+
+<!-- ===== 底部导航 ===== -->
+<nav class="bottom-nav">
+    <button class="nav-item active" data-tab="today" onclick="switchTab('today')">
+        <span class="nav-icon">🏠</span>
+        <span class="nav-label">今日</span>
+    </button>
+    <button class="nav-item" data-tab="wordbook" onclick="switchTab('wordbook')">
+        <span class="nav-icon">📚</span>
+        <span class="nav-label">单词本</span>
+    </button>
+    <button class="nav-item" data-tab="review" onclick="switchTab('review')">
+        <span class="nav-icon">🧠</span>
+        <span class="nav-label">复习</span>
+    </button>
+    <button class="nav-item" data-tab="stats" onclick="switchTab('stats')">
+        <span class="nav-icon">📊</span>
+        <span class="nav-label">统计</span>
+    </button>
+</nav>
+
+<!-- ===== 编辑模态框 ===== -->
+<div class="modal-overlay" id="editModal">
+    <div class="modal">
+        <div class="modal-title">✏️ 编辑单词</div>
+        <div class="input-group">
+            <label>单词</label>
+            <input type="text" id="editWord">
+        </div>
+        <div class="input-group">
+            <label>释义</label>
+            <input type="text" id="editTranslation">
+        </div>
+        <div class="input-group">
+            <label>例句</label>
+            <textarea id="editExample"></textarea>
+        </div>
+        <div class="input-group">
+            <label>笔记</label>
+            <input type="text" id="editNotes">
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-outline" style="flex:1;" onclick="closeEditModal()">取消</button>
+            <button class="btn btn-primary" style="flex:1;" onclick="saveEdit()">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===== Toast ===== -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ============================================
+// 数据管理
+// ============================================
+const STORAGE_KEY = 'duolingo_word_collector';
+let words = [];
+let currentFilter = 'all';
+let currentReviewFilter = 'new';
+let reviewQueue = [];
+let reviewIndex = 0;
+let reviewFlipped = false;
+let editingId = null;
+
+// 初始化
+function loadData() {
+    const data = localStorage.getItem(STORAGE_KEY);
+    if (data) {
+        try {
+            words = JSON.parse(data);
+        } catch(e) {
+            words = [];
+        }
+    }
+}
+
+function saveData() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(words));
+}
+
+function getTodayStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function genId() {
+    return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+}
+
+// ============================================
+// 添加单词
+// ============================================
+function addWord() {
+    const word = document.getElementById('wordInput').value.trim();
+    const translation = document.getElementById('translationInput').value.trim();
+    const example = document.getElementById('exampleInput').value.trim();
+    const notes = document.getElementById('notesInput').value.trim();
+
+    if (!word) {
+        showToast('请输入单词', 'error');
+        return;
+    }
+    if (!translation) {
+        showToast('请输入释义', 'error');
+        return;
+    }
+
+    // 检查重复
+    if (words.some(w => w.word.toLowerCase() === word.toLowerCase())) {
+        showToast('该单词已存在', 'error');
+        return;
+    }
+
+    const newWord = {
+        id: genId(),
+        word: word,
+        translation: translation,
+        example: example,
+        notes: notes,
+        date: getTodayStr(),
+        timestamp: Date.now(),
+        status: 'new'
+    };
+
+    words.unshift(newWord);
+    saveData();
+
+    // 清空输入
+    document.getElementById('wordInput').value = '';
+    document.getElementById('translationInput').value = '';
+    document.getElementById('exampleInput').value = '';
+    document.getElementById('notesInput').value = '';
+    document.getElementById('wordInput').focus();
+
+    showToast('单词已添加！', 'success');
+    renderToday();
+}
+
+// ============================================
+// 渲染今日
+// ============================================
+function renderToday() {
+    const today = getTodayStr();
+    const todayWords = words.filter(w => w.date === today);
+    document.getElementById('todayCount').textContent = todayWords.length;
+
+    const container = document.getElementById('todayWordsContainer');
+    if (todayWords.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">🌱</div>
+                <p>今天还没有收集单词，加油！</p>
+            </div>`;
+        return;
+    }
+
+    container.innerHTML = todayWords.map(w => renderWordCard(w)).join('');
+}
+
+// ============================================
+// 渲染单词卡片
+// ============================================
+function renderWordCard(w) {
+    const statusMap = {
+        'new': { label: '新词', class: 'status-new' },
+        'learning': { label: '学习中', class: 'status-learning' },
+        'mastered': { label: '已掌握', class: 'status-mastered' }
+    };
+    const st = statusMap[w.status] || statusMap['new'];
+
+    return `
+        <div class="word-card ${w.status}">
+            <div class="word-header">
+                <div>
+                    <div class="word-text">${escapeHtml(w.word)}<button class="speak-btn" onclick="speakWord('${escapeAttr(w.word)}')" title="朗读">🔊</button></div>
+                    <div class="word-translation">${escapeHtml(w.translation)}</div>
+                </div>
+                <span class="status-badge ${st.class}">${st.label}</span>
+            </div>
+            ${w.example ? `<div class="word-example">${escapeHtml(w.example)}</div>` : ''}
+            ${w.notes ? `<div class="word-notes">📝 ${escapeHtml(w.notes)}</div>` : ''}
+            <div class="word-footer">
+                <span class="word-date">${w.date}</span>
+                <div class="word-actions">
+                    ${w.status !== 'mastered'
+                        ? `<button class="mini-btn green" onclick="updateStatus('${w.id}','mastered')">✅ 掌握</button>`
+                        : `<button class="mini-btn" onclick="updateStatus('${w.id}','learning')">↩️ 重学</button>`}
+                    ${w.status === 'new'
+                        ? `<button class="mini-btn" onclick="updateStatus('${w.id}','learning')">📖 学习</button>`
+                        : ''}
+                    <button class="mini-btn" onclick="openEditModal('${w.id}')">✏️</button>
+                    <button class="mini-btn red" onclick="deleteWord('${w.id}')">🗑</button>
+                </div>
+            </div>
+        </div>`;
+}
+
+// ============================================
+// 渲染单词本
+// ============================================
+function renderWordbook() {
+    const search = document.getElementById('searchInput').value.toLowerCase();
+    let filtered = words;
+
+    if (currentFilter !== 'all') {
+        filtered = filtered.filter(w => w.status === currentFilter);
+    }
+    if (search) {
+        filtered = filtered.filter(w =>
+            w.word.toLowerCase().includes(search) ||
+            w.translation.toLowerCase().includes(search)
+        );
+    }
+
+    const container = document.getElementById('wordbookContainer');
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">📭</div>
+                <p>没有找到匹配的单词</p>
+            </div>`;
+        return;
+    }
+
+    // 按日期分组
+    const groups = {};
+    filtered.forEach(w => {
+        if (!groups[w.date]) groups[w.date] = [];
+        groups[w.date].push(w);
+    });
+
+    const sortedDates = Object.keys(groups).sort((a,b) => b.localeCompare(a));
+    const today = getTodayStr();
+
+    let html = '';
+    sortedDates.forEach(date => {
+        const isToday = date === today;
+        html += `
+            <div class="date-group-title ${isToday ? 'today' : ''}">
+                ${isToday ? '🔥 今天' : formatDate(date)}
+                <span class="count">${groups[date].length}</span>
+            </div>`;
+        html += groups[date].map(w => renderWordCard(w)).join('');
+    });
+
+    container.innerHTML = html;
+}
+
+// ============================================
+// 筛选
+// ============================================
+function setFilter(filter) {
+    currentFilter = filter;
+    document.querySelectorAll('.tab-content#tab-wordbook .chip').forEach(c => {
+        c.classList.toggle('active', c.dataset.filter === filter);
+    });
+    renderWordbook();
+}
+
+// ============================================
+// 状态更新
+// ============================================
+function updateStatus(id, status) {
+    const w = words.find(w => w.id === id);
+    if (w) {
+        w.status = status;
+        saveData();
+        renderToday();
+        renderWordbook();
+        renderStats();
+        showToast(status === 'mastered' ? '太棒了！已标记为掌握！🎉' : '状态已更新', 'success');
+    }
+}
+
+// ============================================
+// 删除
+// ============================================
+function deleteWord(id) {
+    if (confirm('确定删除这个单词吗？')) {
+        words = words.filter(w => w.id !== id);
+        saveData();
+        renderToday();
+        renderWordbook();
+        renderStats();
+        showToast('已删除', 'success');
+    }
+}
+
+// ============================================
+// 编辑
+// ============================================
+function openEditModal(id) {
+    const w = words.find(w => w.id === id);
+    if (!w) return;
+    editingId = id;
+    document.getElementById('editWord').value = w.word;
+    document.getElementById('editTranslation').value = w.translation;
+    document.getElementById('editExample').value = w.example || '';
+    document.getElementById('editNotes').value = w.notes || '';
+    document.getElementById('editModal').classList.add('show');
+}
+
+function closeEditModal() {
+    document.getElementById('editModal').classList.remove('show');
+    editingId = null;
+}
+
+function saveEdit() {
+    const w = words.find(w => w.id === editingId);
+    if (!w) return;
+    w.word = document.getElementById('editWord').value.trim();
+    w.translation = document.getElementById('editTranslation').value.trim();
+    w.example = document.getElementById('editExample').value.trim();
+    w.notes = document.getElementById('editNotes').value.trim();
+
+    if (!w.word || !w.translation) {
+        showToast('单词和释义不能为空', 'error');
+        return;
+    }
+
+    saveData();
+    closeEditModal();
+    renderToday();
+    renderWordbook();
+    renderStats();
+    showToast('已保存修改', 'success');
+}
+
+// ============================================
+// 复习模式
+// ============================================
+function setReviewFilter(filter) {
+    currentReviewFilter = filter;
+    document.querySelectorAll('.tab-content#tab-review .chip').forEach(c => {
+        c.classList.toggle('active', c.dataset.reviewFilter === filter);
+    });
+    renderReviewStats();
+}
+
+function renderReviewStats() {
+    let count;
+    if (currentReviewFilter === 'all') {
+        count = words.length;
+    } else {
+        count = words.filter(w => w.status === currentReviewFilter).length;
+    }
+    document.getElementById('reviewStats').innerHTML = `
+        <div style="display:flex;gap:12px;justify-content:center;">
+            <div style="text-align:center;">
+                <div style="font-size:32px;font-weight:900;color:var(--duo-blue);">${count}</div>
+                <div style="font-size:13px;color:var(--duo-gray);font-weight:600;">待复习单词</div>
+            </div>
+        </div>`;
+}
+
+function startReview() {
+    if (currentReviewFilter === 'all') {
+        reviewQueue = [...words];
+    } else {
+        reviewQueue = words.filter(w => w.status === currentReviewFilter);
+    }
+
+    if (reviewQueue.length === 0) {
+        showToast('没有可复习的单词', 'error');
+        return;
+    }
+
+    // 随机排序
+    reviewQueue.sort(() => Math.random() - 0.5);
+    reviewIndex = 0;
+    reviewFlipped = false;
+
+    document.getElementById('reviewSetup').style.display = 'none';
+    document.getElementById('reviewSession').style.display = 'block';
+
+    renderReviewDots();
+    showFlashcard();
+}
+
+function renderReviewDots() {
+    const dots = reviewQueue.map((_, i) => {
+        let cls = '';
+        if (i < reviewIndex) cls = 'done';
+        else if (i === reviewIndex) cls = 'current';
+        return `<div class="review-dot ${cls}"></div>`;
+    }).join('');
+    document.getElementById('reviewDots').innerHTML = dots;
+}
+
+function showFlashcard() {
+    const w = reviewQueue[reviewIndex];
+    reviewFlipped = false;
+    const card = document.getElementById('flashcard');
+    card.classList.remove('flipped');
+
+    document.getElementById('flashcardContent').innerHTML = `
+        <div class="flashcard-word">${escapeHtml(w.word)}</div>
+        <button class="flashcard-speak" onclick="speakWord('${escapeAttr(w.word)}')" title="朗读">🔊</button>
+    `;
+    document.getElementById('reviewProgress').textContent =
+        `${reviewIndex + 1} / ${reviewQueue.length}`;
+    renderReviewDots();
+}
+
+function flipCard() {
+    const w = reviewQueue[reviewIndex];
+    reviewFlipped = !reviewFlipped;
+    const card = document.getElementById('flashcard');
+
+    if (reviewFlipped) {
+        card.classList.add('flipped');
+        document.getElementById('flashcardContent').innerHTML = `
+            <div class="flashcard-word">${escapeHtml(w.word)}</div>
+            <div class="flashcard-translation">${escapeHtml(w.translation)}</div>
+            ${w.example ? `<div class="flashcard-example">${escapeHtml(w.example)}</div>` : ''}
+            <button class="flashcard-speak" onclick="speakWord('${escapeAttr(w.word)}')" title="朗读">🔊</button>
+        `;
+    } else {
+        card.classList.remove('flipped');
+        document.getElementById('flashcardContent').innerHTML = `
+            <div class="flashcard-word">${escapeHtml(w.word)}</div>
+            <button class="flashcard-speak" onclick="speakWord('${escapeAttr(w.word)}')" title="朗读">🔊</button>
+        `;
+    }
+}
+
+function reviewAction(action) {
+    const w = reviewQueue[reviewIndex];
+    if (action === 'gotit') {
+        w.status = 'mastered';
+    } else {
+        w.status = 'learning';
+    }
+    saveData();
+
+    reviewIndex++;
+    if (reviewIndex >= reviewQueue.length) {
+        // 复习完成
+        document.getElementById('reviewSession').style.display = 'none';
+        document.getElementById('reviewSetup').style.display = 'block';
+        renderReviewStats();
+        renderToday();
+        renderWordbook();
+        renderStats();
+        showToast('复习完成！🎉', 'success');
+    } else {
+        showFlashcard();
+    }
+}
+
+function endReview() {
+    document.getElementById('reviewSession').style.display = 'none';
+    document.getElementById('reviewSetup').style.display = 'block';
+    renderReviewStats();
+    renderToday();
+    renderWordbook();
+    renderStats();
+}
+
+// ============================================
+// 统计
+// ============================================
+function renderStats() {
+    const total = words.length;
+    const newCount = words.filter(w => w.status === 'new').length;
+    const learningCount = words.filter(w => w.status === 'learning').length;
+    const masteredCount = words.filter(w => w.status === 'mastered').length;
+
+    document.getElementById('statTotal').textContent = total;
+    document.getElementById('statNew').textContent = newCount;
+    document.getElementById('statLearning').textContent = learningCount;
+    document.getElementById('statMastered').textContent = masteredCount;
+
+    // 进度环
+    const pct = total > 0 ? Math.round((masteredCount / total) * 100) : 0;
+    document.getElementById('progressPct').textContent = pct + '%';
+    const circumference = 2 * Math.PI * 50;
+    const offset = circumference - (pct / 100) * circumference;
+    document.getElementById('progressCircle').style.strokeDashoffset = offset;
+
+    // 7天趋势图
+    renderWeekChart();
+}
+
+function renderWeekChart() {
+    const today = new Date();
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        const count = words.filter(w => w.date === dateStr).length;
+        days.push({ date: dateStr, count: count, label: `${d.getMonth()+1}/${d.getDate()}` });
+    }
+
+    const maxCount = Math.max(...days.map(d => d.count), 1);
+    const chartHtml = days.map(d => {
+        const height = (d.count / maxCount) * 100;
+        return `
+            <div class="bar-item">
+                <div class="bar" style="height: ${height}%;">
+                    ${d.count > 0 ? `<span class="bar-count">${d.count}</span>` : ''}
+                </div>
+                <div class="bar-label">${d.label}</div>
+            </div>`;
+    }).join('');
+
+    document.getElementById('weekChart').innerHTML = chartHtml;
+}
+
+// ============================================
+// 数据导入导出
+// ============================================
+function exportData() {
+    if (words.length === 0) {
+        showToast('没有数据可导出', 'error');
+        return;
+    }
+    const data = {
+        exportDate: getTodayStr(),
+        wordCount: words.length,
+        words: words
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `duolingo-words-${getTodayStr()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('数据已导出', 'success');
+}
+
+function importData(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const data = JSON.parse(e.target.result);
+            let importedWords;
+            if (Array.isArray(data)) {
+                importedWords = data;
+            } else if (data.words) {
+                importedWords = data.words;
+            } else {
+                throw new Error('Invalid format');
+            }
+
+            // 确保每个单词都有必要字段
+            importedWords = importedWords.filter(w => w.word && w.translation);
+            importedWords.forEach(w => {
+                if (!w.id) w.id = genId();
+                if (!w.status) w.status = 'new';
+                if (!w.date) w.date = getTodayStr();
+                if (!w.timestamp) w.timestamp = Date.now();
+            });
+
+            // 合并（去重）
+            const existingWords = new Set(words.map(w => w.word.toLowerCase()));
+            let added = 0;
+            importedWords.forEach(w => {
+                if (!existingWords.has(w.word.toLowerCase())) {
+                    words.push(w);
+                    added++;
+                }
+            });
+
+            saveData();
+            renderToday();
+            renderWordbook();
+            renderStats();
+            showToast(`导入完成！新增 ${added} 个单词`, 'success');
+        } catch(err) {
+            showToast('导入失败：文件格式错误', 'error');
+        }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+}
+
+function clearAllData() {
+    if (confirm('确定清空所有单词数据吗？此操作不可恢复！')) {
+        if (confirm('再次确认：真的要删除全部数据吗？')) {
+            words = [];
+            saveData();
+            renderToday();
+            renderWordbook();
+            renderStats();
+            showToast('所有数据已清空', 'success');
+        }
+    }
+}
+
+// ============================================
+// 工具函数
+// ============================================
+function switchTab(tab) {
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    document.getElementById('tab-' + tab).classList.add('active');
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.querySelector(`.nav-item[data-tab="${tab}"]`).classList.add('active');
+
+    if (tab === 'today') renderToday();
+    if (tab === 'wordbook') renderWordbook();
+    if (tab === 'review') renderReviewStats();
+    if (tab === 'stats') renderStats();
+}
+
+function showToast(msg, type = '') {
+    const toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.className = 'toast show ' + type;
+    setTimeout(() => {
+        toast.className = 'toast ' + type;
+    }, 2000);
+}
+
+function formatDate(dateStr) {
+    const d = new Date(dateStr);
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    if (d.toDateString() === today.toDateString()) return '今天';
+    if (d.toDateString() === yesterday.toDateString()) return '昨天';
+    return `${d.getMonth()+1}月${d.getDate()}日`;
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+// 转义用于 HTML 属性（单引号包裹）
+function escapeAttr(str) {
+    if (!str) return '';
+    return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+// ============================================
+// 单词发音（Web Speech API）
+// ============================================
+function speakWord(word) {
+    if (!('speechSynthesis' in window)) {
+        showToast('浏览器不支持语音功能', 'error');
+        return;
+    }
+
+    // 停止正在播放的语音
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(word);
+    utterance.lang = 'en-US';
+    utterance.rate = 0.9;
+    utterance.pitch = 1;
+
+    // 尝试选择英语语音引擎
+    const voices = window.speechSynthesis.getVoices();
+    const enVoice = voices.find(v => v.lang.startsWith('en'));
+    if (enVoice) utterance.voice = enVoice;
+
+    window.speechSynthesis.speak(utterance);
+}
+
+// 语音引擎加载（部分浏览器需要异步加载）
+if ('speechSynthesis' in window) {
+    window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.getVoices();
+    };
+}
+
+// ============================================
+// 启动
+// ============================================
+loadData();
+renderToday();
+renderWordbook();
+renderReviewStats();
+renderStats();
+
+// 键盘快捷键
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeEditModal();
+    }
+});
+
+// ============================================
+// PWA: Service Worker 注册
+// ============================================
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch((err) => {
+            console.log('SW 注册失败:', err);
+        });
+    });
+}
+
+// ============================================
+// 一键粘贴剪贴板
+// ============================================
+async function pasteToWord() {
+    try {
+        if (navigator.clipboard && navigator.clipboard.readText) {
+            const text = await navigator.clipboard.readText();
+            if (text && text.trim()) {
+                // 取第一个词作为单词
+                const cleaned = text.trim().split(/\s+/)[0];
+                document.getElementById('wordInput').value = cleaned;
+                document.getElementById('translationInput').focus();
+                showToast('已粘贴：' + cleaned, 'success');
+            } else {
+                showToast('剪贴板是空的', 'error');
+            }
+        } else {
+            showToast('当前浏览器不支持，请手动粘贴', 'error');
+        }
+    } catch (err) {
+        showToast('读取失败，请手动粘贴 (Ctrl+V)', 'error');
+    }
+}
+
+// ============================================
+// 接收分享内容（Web Share Target）
+// ============================================
+function handleSharedData() {
+    const params = new URLSearchParams(window.location.search);
+    const sharedTitle = params.get('title') || '';
+    const sharedText = params.get('text') || '';
+    const sharedUrl = params.get('url') || '';
+
+    const combined = (sharedText || sharedTitle || sharedUrl || '').trim();
+    if (!combined) return;
+
+    const lines = combined.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    const firstLine = lines[0] || combined;
+    const tokens = firstLine.split(/\s+/);
+    const word = tokens[0];
+
+    document.getElementById('wordInput').value = word;
+
+    // 多行内容放进例句
+    if (lines.length > 1) {
+        document.getElementById('exampleInput').value = lines.slice(1).join('\n');
+    } else if (tokens.length > 1) {
+        document.getElementById('exampleInput').value = firstLine;
+    }
+
+    // 清除 URL 参数，避免刷新重复填充
+    history.replaceState({}, document.title, window.location.pathname);
+
+    switchTab('today');
+    document.getElementById('translationInput').focus();
+    showToast('收到分享内容，请补充释义', 'success');
+}
+
+// ============================================
+// 安装到主屏幕
+// ============================================
+let deferredPrompt = null;
+
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    if (!sessionStorage.getItem('install_dismissed')) {
+        document.getElementById('installBanner').style.display = 'flex';
+    }
+});
+
+document.getElementById('installBtn').addEventListener('click', async () => {
+    if (!deferredPrompt) {
+        showToast('请用浏览器菜单的「添加到主屏幕」', '');
+        return;
+    }
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+        showToast('安装成功！可在主屏幕打开', 'success');
+    }
+    deferredPrompt = null;
+    document.getElementById('installBanner').style.display = 'none';
+});
+
+window.addEventListener('appinstalled', () => {
+    document.getElementById('installBanner').style.display = 'none';
+});
+
+function dismissInstall() {
+    document.getElementById('installBanner').style.display = 'none';
+    sessionStorage.setItem('install_dismissed', '1');
+}
+
+// 已安装（独立模式）则不提示
+if (window.matchMedia('(display-mode: standalone)').matches || navigator.standalone) {
+    // PWA 已安装
+}
+
+// 启动时处理分享数据
+handleSharedData();
+</script>
+
+</body>
+</html>
