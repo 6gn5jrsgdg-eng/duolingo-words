@@ -2336,32 +2336,54 @@ async function lookupWord(word) {
     showDictHint('loading', '');
 
     try {
-        // 并行查询三个 API：中文翻译 + 英文词典 + 双语例句
-        const [transResult, dictResult, examplesResult] = await Promise.allSettled([
-            fetchTranslate(word, signal),
-            fetchDictEnglish(word, signal),
-            fetchExamples(word, signal)
+        // === 第一阶段：快速查找（常用词典 + IndexedDB）===
+        const fastResult = await fetchTranslate(word, signal);
+
+        if (fastResult && fastResult.translation) {
+            // IndexedDB/常用词典命中，立即显示结果
+            const result = {
+                word: word,
+                translation: fastResult.translation,
+                phonetic: fastResult.phonetic || '',
+                audioUrl: '',
+                examples: [],
+                definitions: []
+            };
+
+            lastDictResult = result;
+            showDictResult(result);
+
+            // === 第二阶段：后台补充例句和发音（不阻塞界面）===
+            enrichInBackground(word, signal, result);
+            return;
+        }
+
+        // === 第三阶段：IndexedDB 未命中，并行查询在线 API ===
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('timeout')), 8000)
+        );
+
+        const [dictResult, examplesResult] = await Promise.allSettled([
+            Promise.race([fetchDictEnglish(word, signal), timeoutPromise]),
+            Promise.race([fetchExamples(word, signal), timeoutPromise])
         ]);
 
-        const transData = transResult.status === 'fulfilled' ? transResult.value : null;
         const dictData = dictResult.status === 'fulfilled' ? dictResult.value : null;
         const examplesData = examplesResult.status === 'fulfilled' ? examplesResult.value : null;
 
-        if (!transData && !dictData && !examplesData) {
+        if (!dictData && !examplesData) {
             showDictHint('error', '未找到该单词的词典信息');
             return;
         }
 
         // 组装结果
-        let translation = (transData && transData.translation) || '';
-        if (!translation && dictData && dictData.definitions.length > 0) {
-            // 没有中文翻译时，用英文释义兜底
+        let translation = '';
+        if (dictData && dictData.definitions.length > 0) {
             translation = dictData.definitions.slice(0, 3).map(d =>
                 (d.pos ? '(' + d.pos + ') ' : '') + d.definition
             ).join('; ');
         }
 
-        // 例句：优先用 Tatoeba 双语例句，其次用英文词典例句
         let examples = [];
         if (examplesData && examplesData.length > 0) {
             examples = examplesData;
@@ -2372,7 +2394,7 @@ async function lookupWord(word) {
         const result = {
             word: word,
             translation: translation,
-            phonetic: (dictData && dictData.phonetic) || (transData && transData.phonetic) || '',
+            phonetic: (dictData && dictData.phonetic) || '',
             audioUrl: (dictData && dictData.audioUrl) || '',
             examples: examples,
             definitions: dictData ? dictData.definitions : []
@@ -2384,6 +2406,54 @@ async function lookupWord(word) {
         if (err.name !== 'AbortError') {
             showDictHint('error', '查询失败，请稍后重试');
         }
+    }
+}
+
+// 后台补充例句和发音（不阻塞用户操作）
+async function enrichInBackground(word, parentSignal, result) {
+    try {
+        const enrichController = new AbortController();
+        // 父请求取消时，也取消补充请求
+        parentSignal.addEventListener('abort', () => enrichController.abort());
+
+        const [dictData, examplesData] = await Promise.allSettled([
+            fetchDictEnglish(word, enrichController.signal),
+            fetchExamples(word, enrichController.signal)
+        ]);
+
+        const dict = dictData.status === 'fulfilled' ? dictData.value : null;
+        const examples = examplesData.status === 'fulfilled' ? examplesData.value : null;
+
+        let updated = false;
+
+        // 补充发音 URL
+        if (dict && dict.audioUrl && !result.audioUrl) {
+            result.audioUrl = dict.audioUrl;
+            updated = true;
+        }
+
+        // 补充英文释义
+        if (dict && dict.definitions && dict.definitions.length > 0 && result.definitions.length === 0) {
+            result.definitions = dict.definitions;
+            updated = true;
+        }
+
+        // 补充例句
+        if (examples && examples.length > 0 && result.examples.length === 0) {
+            result.examples = examples;
+            updated = true;
+        } else if (dict && dict.examples && dict.examples.length > 0 && result.examples.length === 0) {
+            result.examples = dict.examples;
+            updated = true;
+        }
+
+        // 只有在当前结果仍然是这个单词时才更新界面
+        if (updated && lastDictResult && lastDictResult.word === word) {
+            lastDictResult = result;
+            showDictResult(result);
+        }
+    } catch (e) {
+        // 后台补充失败，静默忽略
     }
 }
 
