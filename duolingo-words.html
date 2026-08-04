@@ -502,6 +502,27 @@
             color: white;
         }
 
+        .reverse-result-item {
+            display: block;
+            width: 100%;
+            text-align: left;
+            padding: 6px 10px;
+            margin-top: 4px;
+            border: 1px solid var(--duo-gray);
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+            font-size: 13px;
+            font-family: inherit;
+            color: var(--duo-text);
+            transition: all 0.15s;
+        }
+
+        .reverse-result-item:hover {
+            border-color: var(--duo-blue);
+            background: var(--duo-blue-light);
+        }
+
         .word-translation {
             font-size: 16px;
             color: var(--duo-text-light);
@@ -2312,18 +2333,151 @@ document.getElementById('wordInput').addEventListener('input', function(e) {
     const word = e.target.value.trim();
     lastDictResult = null;
 
-    if (word.length < 2) {
-        hideDictHint();
-        return;
-    }
-    // 只查询英文单词
-    if (!/^[a-zA-Z\-'\s]+$/.test(word)) {
+    if (word.length < 1) {
         hideDictHint();
         return;
     }
 
-    dictLookupTimer = setTimeout(() => lookupWord(word), 600);
+    // 检测输入类型：英文 or 中文
+    const hasChinese = /[\u4e00-\u9fff]/.test(word);
+    const hasEnglish = /[a-zA-Z]/.test(word);
+
+    if (hasChinese) {
+        // 中文输入：反查英文单词
+        dictLookupTimer = setTimeout(() => lookupByChinese(word), 400);
+    } else if (hasEnglish && word.length >= 2) {
+        // 英文输入：查英汉词典
+        if (!/^[a-zA-Z\-'\s]+$/.test(word)) {
+            hideDictHint();
+            return;
+        }
+        dictLookupTimer = setTimeout(() => lookupWord(word), 600);
+    } else {
+        hideDictHint();
+    }
 });
+
+// ============================================
+// 中文反查：输入中文，找出对应的英文单词
+// ============================================
+let reverseChunkCache = {};
+
+async function loadReverseChunk(firstCharCode) {
+    // 按 Unicode 码点均匀分 26 片
+    const charStart = 0x4E00;
+    const charEnd = 0x9FFF + 1;
+    const chunkSize = Math.ceil((charEnd - charStart) / 26);
+    let idx = Math.floor((firstCharCode - charStart) / chunkSize);
+    if (idx < 0 || idx >= 26) idx = 25;
+    const letter = String.fromCharCode(97 + idx); // 'a' + idx
+
+    if (reverseChunkCache[letter]) return reverseChunkCache[letter];
+
+    try {
+        const resp = await fetch('./dict-reverse/rev-' + letter + '.json');
+        if (resp.ok) {
+            const data = await resp.json();
+            reverseChunkCache[letter] = data;
+            console.log('[反查] 已加载分片 [' + letter + ']:', Object.keys(data).length, '个关键词');
+            return data;
+        }
+    } catch (e) {
+        console.log('[反查] 加载分片失败:', e);
+    }
+    return null;
+}
+
+async function lookupByChinese(query) {
+    if (dictLookupController) {
+        dictLookupController.abort();
+    }
+    dictLookupController = new AbortController();
+    const signal = dictLookupController.signal;
+
+    showDictHint('loading', '正在反查中文 "' + query + '"...');
+
+    try {
+        const firstCharCode = query.charCodeAt(0);
+        const chunk = await loadReverseChunk(firstCharCode);
+        if (!chunk) {
+            showDictHint('error', '反查索引加载失败');
+            return;
+        }
+
+        // 精确匹配 + 模糊匹配
+        const exact = [];
+        const fuzzy = [];
+
+        for (const [kw, words] of Object.entries(chunk)) {
+            if (kw === query) {
+                exact.push(...words);
+            } else if (kw.includes(query) || query.includes(kw)) {
+                fuzzy.push(...words);
+            }
+        }
+
+        // 去重
+        const allWords = [...new Set([...exact, ...fuzzy])].slice(0, 10);
+
+        if (allWords.length === 0) {
+            showDictHint('error', '未找到包含"' + query + '"的英文单词');
+            return;
+        }
+
+        // 查询每个英文单词的翻译
+        const results = [];
+        for (const w of allWords.slice(0, 5)) {
+            const transResult = await fetchTranslate(w, signal);
+            if (transResult && transResult.translation) {
+                results.push({
+                    word: w,
+                    translation: transResult.translation,
+                    phonetic: transResult.phonetic || ''
+                });
+            }
+        }
+
+        if (results.length === 0) {
+            showDictHint('error', '找到单词但无法获取翻译');
+            return;
+        }
+
+        showChineseSearchResult(results);
+    } catch (err) {
+        if (err.name !== 'AbortError') {
+            showDictHint('error', '反查失败，请稍后重试');
+        }
+    }
+}
+
+function showChineseSearchResult(results) {
+    const hint = document.getElementById('dictHint');
+    hint.className = 'dict-hint show success';
+
+    let html = '<span>🔍 找到 ' + results.length + ' 个单词:</span>';
+
+    // 显示前5个结果
+    for (let i = 0; i < Math.min(results.length, 5); i++) {
+        const r = results[i];
+        const preview = r.translation.length > 20 ? r.translation.substring(0, 20) + '...' : r.translation;
+        html += '<button class="reverse-result-item" onclick="selectReverseWord(\'' + r.word.replace(/'/g, "\\'") + '\')">';
+        html += '<strong>' + escapeHtml(r.word) + '</strong>';
+        if (r.phonetic) html += ' <span style="font-family:monospace;font-size:0.85em;">' + escapeHtml(r.phonetic) + '</span>';
+        html += ' ' + escapeHtml(preview);
+        html += '</button>';
+    }
+
+    hint.innerHTML = html;
+}
+
+function selectReverseWord(word) {
+    // 用户选择了反查结果中的单词，填充到输入框并触发英文查询
+    const input = document.getElementById('wordInput');
+    input.value = word;
+    // 触发英文查词
+    lastDictResult = null;
+    lookupWord(word);
+}
 
 async function lookupWord(word) {
     // 取消上一次请求
@@ -2340,14 +2494,15 @@ async function lookupWord(word) {
         const fastResult = await fetchTranslate(word, signal);
 
         if (fastResult && fastResult.translation) {
-            // IndexedDB/常用词典命中，立即显示结果
+            // IndexedDB/常用词典命中，立即显示结果（不含例句，后台补充）
             const result = {
                 word: word,
                 translation: fastResult.translation,
                 phonetic: fastResult.phonetic || '',
                 audioUrl: '',
                 examples: [],
-                definitions: []
+                examplesLoading: true,
+                definitions: fastResult.definition ? fastResult.definition.split('\n').filter(d => d.trim()).map(d => ({pos: '', definition: d.trim()})) : []
             };
 
             lastDictResult = result;
@@ -2413,12 +2568,16 @@ async function lookupWord(word) {
 async function enrichInBackground(word, parentSignal, result) {
     try {
         const enrichController = new AbortController();
-        // 父请求取消时，也取消补充请求
         parentSignal.addEventListener('abort', () => enrichController.abort());
 
+        // 只查例句和发音，用较短超时
+        const shortTimeout = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('timeout')), 6000)
+        );
+
         const [dictData, examplesData] = await Promise.allSettled([
-            fetchDictEnglish(word, enrichController.signal),
-            fetchExamples(word, enrichController.signal)
+            Promise.race([fetchDictEnglish(word, enrichController.signal), shortTimeout]),
+            Promise.race([fetchExamples(word, enrichController.signal), shortTimeout])
         ]);
 
         const dict = dictData.status === 'fulfilled' ? dictData.value : null;
@@ -2432,28 +2591,35 @@ async function enrichInBackground(word, parentSignal, result) {
             updated = true;
         }
 
-        // 补充英文释义
+        // 补充英文释义（如果之前没有）
         if (dict && dict.definitions && dict.definitions.length > 0 && result.definitions.length === 0) {
             result.definitions = dict.definitions;
             updated = true;
         }
 
-        // 补充例句
-        if (examples && examples.length > 0 && result.examples.length === 0) {
+        // 优先用双语例句，其次用 dictionaryapi.dev 的英文例句
+        if (examples && examples.length > 0) {
             result.examples = examples;
             updated = true;
-        } else if (dict && dict.examples && dict.examples.length > 0 && result.examples.length === 0) {
+        } else if (dict && dict.examples && dict.examples.length > 0) {
             result.examples = dict.examples;
             updated = true;
         }
 
-        // 只有在当前结果仍然是这个单词时才更新界面
-        if (updated && lastDictResult && lastDictResult.word === word) {
+        // 标记例句加载完成（无论是否找到）
+        result.examplesLoading = false;
+
+        if (lastDictResult && lastDictResult.word === word) {
             lastDictResult = result;
             showDictResult(result);
         }
     } catch (e) {
-        // 后台补充失败，静默忽略
+        // 后台补充失败，清除加载状态
+        result.examplesLoading = false;
+        if (lastDictResult && lastDictResult.word === word) {
+            lastDictResult = result;
+            showDictResult(result);
+        }
     }
 }
 
@@ -2593,7 +2759,7 @@ async function fetchTranslate(word, signal) {
             }
             const result = await queryDictDB(wordLower);
             if (result && result.t) {
-                return { translation: result.t, phonetic: result.p || '' };
+                return { translation: result.t, phonetic: result.p || '', definition: result.d || '' };
             }
         } catch (e) {
             if (e.name === 'AbortError') throw e;
@@ -2663,33 +2829,42 @@ async function fetchExamples(word, signal) {
         } catch (e) { /* 回退到线上方案 */ }
     }
 
-    // 线上：通过 CORS 代理访问 Tatoeba
-    try {
-        const targetUrl = 'https://tatoeba.org/en/api_v0/search?query=' + encodeURIComponent(word) + '&from=eng&to=cmn&trans_filter=limit&trans_to=cmn';
-        const resp = await fetch(CORS_PROXY + encodeURIComponent(targetUrl), { signal });
-        if (resp.ok) {
-            const data = await resp.json();
-            if (data && data.results) {
-                const examples = [];
-                for (const result of data.results.slice(0, 5)) {
-                    const en = result.text || '';
-                    let zh = '';
-                    if (result.translations && result.translations[0] && result.translations[0][0]) {
-                        const trans = result.translations[0][0];
-                        zh = trans.text || '';
-                        if (trans.transcriptions) {
-                            for (const tc of trans.transcriptions) {
-                                if (tc.script === 'Hans' && tc.text) { zh = tc.text; break; }
+    // 线上：通过多个 CORS 代理尝试访问 Tatoeba
+    const targetUrl = 'https://tatoeba.org/en/api_v0/search?query=' + encodeURIComponent(word) + '&from=eng&to=cmn&trans_filter=limit&trans_to=cmn';
+    const corsProxies = [
+        'https://api.allorigins.win/raw?url=',
+        'https://corsproxy.io/?url=',
+        'https://api.codetabs.com/v1/proxy/?quest='
+    ];
+
+    for (const proxy of corsProxies) {
+        try {
+            const proxyUrl = proxy + encodeURIComponent(targetUrl);
+            const resp = await fetch(proxyUrl, { signal });
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data && data.results) {
+                    const examples = [];
+                    for (const result of data.results.slice(0, 5)) {
+                        const en = result.text || '';
+                        let zh = '';
+                        if (result.translations && result.translations[0] && result.translations[0][0]) {
+                            const trans = result.translations[0][0];
+                            zh = trans.text || '';
+                            if (trans.transcriptions) {
+                                for (const tc of trans.transcriptions) {
+                                    if (tc.script === 'Hans' && tc.text) { zh = tc.text; break; }
+                                }
                             }
                         }
+                        if (en && zh) examples.push(en + '\n' + zh);
+                        if (examples.length >= 3) break;
                     }
-                    if (en && zh) examples.push(en + '\n' + zh);
-                    if (examples.length >= 3) break;
+                    if (examples.length > 0) return examples;
                 }
-                if (examples.length > 0) return examples;
             }
-        }
-    } catch (e) { /* 失败 */ }
+        } catch (e) { /* 尝试下一个代理 */ }
+    }
 
     return null;
 }
@@ -2791,9 +2966,11 @@ function showDictResult(result) {
         html += '<span>' + escapeHtml(preview) + '</span>';
     }
 
-    // 例句数量
+    // 例句数量 / 加载状态
     if (result.examples && result.examples.length > 0) {
         html += '<span>📝 ' + result.examples.length + '条例句</span>';
+    } else if (result.examplesLoading) {
+        html += '<span style="opacity:0.6;">📝 例句加载中...</span>';
     }
 
     // 自动填充按钮
