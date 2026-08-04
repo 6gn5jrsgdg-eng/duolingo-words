@@ -2570,9 +2570,9 @@ async function enrichInBackground(word, parentSignal, result) {
         const enrichController = new AbortController();
         parentSignal.addEventListener('abort', () => enrichController.abort());
 
-        // 只查例句和发音，用较短超时
+        // 阶段1：尝试 dictionaryapi.dev + Tatoeba（可能在中国被墙）
         const shortTimeout = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('timeout')), 6000)
+            setTimeout(() => reject(new Error('timeout')), 8000)
         );
 
         const [dictData, examplesData] = await Promise.allSettled([
@@ -2583,30 +2583,32 @@ async function enrichInBackground(word, parentSignal, result) {
         const dict = dictData.status === 'fulfilled' ? dictData.value : null;
         const examples = examplesData.status === 'fulfilled' ? examplesData.value : null;
 
-        let updated = false;
-
         // 补充发音 URL
         if (dict && dict.audioUrl && !result.audioUrl) {
             result.audioUrl = dict.audioUrl;
-            updated = true;
         }
 
-        // 补充英文释义（如果之前没有）
+        // 补充英文释义
         if (dict && dict.definitions && dict.definitions.length > 0 && result.definitions.length === 0) {
             result.definitions = dict.definitions;
-            updated = true;
         }
 
         // 优先用双语例句，其次用 dictionaryapi.dev 的英文例句
         if (examples && examples.length > 0) {
             result.examples = examples;
-            updated = true;
         } else if (dict && dict.examples && dict.examples.length > 0) {
             result.examples = dict.examples;
-            updated = true;
         }
 
-        // 标记例句加载完成（无论是否找到）
+        // 阶段2：如果还没例句，用 MyMemory 生成（在中国可用）
+        if (result.examples.length === 0 && result.translation) {
+            const generated = await generateExamples(word, result.translation, enrichController.signal);
+            if (generated && generated.length > 0) {
+                result.examples = generated;
+            }
+        }
+
+        // 标记例句加载完成
         result.examplesLoading = false;
 
         if (lastDictResult && lastDictResult.word === word) {
@@ -2812,6 +2814,65 @@ async function fetchTranslate(word, signal) {
     } catch (e) { /* 失败 */ }
 
     return null;
+}
+
+// 用 MyMemory API 生成双语例句（在中国可用的可靠方案）
+async function generateExamples(word, translation, signal) {
+    // 根据中文翻译推断词性，选择合适的句型
+    const trans = translation || '';
+    const isNoun = /(^|[,;\s])n\./.test(trans) || /名词/.test(trans);
+    const isVerb = /(^|[,;\s])(v|vi|vt)\./.test(trans) || /动词/.test(trans);
+    const isAdj = /(^|[,;\s])adj\./.test(trans) || /形容词/.test(trans);
+
+    // 构造包含目标单词的英文句子
+    let templates = [];
+    if (isNoun) {
+        templates = [
+            'I bought a ' + word + ' yesterday.',
+            'This ' + word + ' is very useful.',
+            'She showed me her new ' + word + '.'
+        ];
+    } else if (isVerb) {
+        templates = [
+            'I ' + word + ' every day.',
+            'She likes to ' + word + ' in the morning.',
+            'They will ' + word + ' together.'
+        ];
+    } else if (isAdj) {
+        templates = [
+            'The weather is ' + word + ' today.',
+            'He looks very ' + word + '.',
+            'This book is quite ' + word + '.'
+        ];
+    } else {
+        // 通用句型
+        templates = [
+            'I learned the word "' + word + '" today.',
+            'Can you use "' + word + '" in a sentence?',
+            'I think ' + word + ' is interesting.'
+        ];
+    }
+
+    const examples = [];
+    for (const enSentence of templates.slice(0, 3)) {
+        try {
+            const url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(enSentence) + '&langpair=en|zh';
+            const resp = await fetch(url, { signal });
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data && data.responseData && data.responseData.translatedText) {
+                    const zhSentence = data.responseData.translatedText;
+                    // 确保翻译包含中文
+                    if (/[\u4e00-\u9fff]/.test(zhSentence)) {
+                        examples.push(enSentence + '\n' + zhSentence);
+                    }
+                }
+            }
+        } catch (e) { /* 继续下一句 */ }
+        if (examples.length >= 2) break;
+    }
+
+    return examples.length > 0 ? examples : null;
 }
 
 // 双语例句（本地代理 → Tatoeba / 线上通过 CORS 代理）
