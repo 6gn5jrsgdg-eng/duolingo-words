@@ -2372,7 +2372,7 @@ async function lookupWord(word) {
         const result = {
             word: word,
             translation: translation,
-            phonetic: (dictData && dictData.phonetic) || '',
+            phonetic: (dictData && dictData.phonetic) || (transData && transData.phonetic) || '',
             audioUrl: (dictData && dictData.audioUrl) || '',
             examples: examples,
             definitions: dictData ? dictData.definitions : []
@@ -2388,7 +2388,8 @@ async function lookupWord(word) {
 }
 
 // ============================================
-// 内嵌词典（离线优先：先查本地，再查 API）
+// 完整英汉词典 (ECDICT 770K词条) - IndexedDB 存储 + 按需分片加载
+// 查词流程: 内嵌455常用词 → IndexedDB完整词典 → 在线API
 // ============================================
 let embeddedDict = null;
 
@@ -2398,15 +2399,102 @@ async function loadEmbeddedDict() {
         const resp = await fetch('./dict-data.json');
         if (resp.ok) {
             embeddedDict = await resp.json();
-            console.log('[词典] 内嵌词典已加载，共', Object.keys(embeddedDict).length, '个词');
+            console.log('[词典] 常用词典已加载，共', Object.keys(embeddedDict).length, '个词');
         }
     } catch (e) {
-        console.log('[词典] 内嵌词典加载失败，将使用在线 API');
+        console.log('[词典] 常用词典加载失败');
     }
     return embeddedDict;
 }
 
-// 页面加载时预载内嵌词典
+// --- IndexedDB 核心 ---
+let dbInstance = null;
+
+function openDictDB() {
+    if (dbInstance) return Promise.resolve(dbInstance);
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open('ecdict', 1);
+        req.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains('words')) db.createObjectStore('words');
+            if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
+        };
+        req.onsuccess = (e) => { dbInstance = e.target.result; resolve(dbInstance); };
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function isChunkLoaded(letter) {
+    const db = await openDictDB();
+    return new Promise((resolve) => {
+        const req = db.transaction('meta', 'readonly').objectStore('meta').get(letter);
+        req.onsuccess = () => resolve(!!req.result);
+        req.onerror = () => resolve(false);
+    });
+}
+
+async function markChunkLoaded(letter) {
+    const db = await openDictDB();
+    return new Promise((resolve) => {
+        const tx = db.transaction('meta', 'readwrite');
+        tx.objectStore('meta').put(true, letter);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+    });
+}
+
+// 加载字母分片到 IndexedDB
+async function loadChunk(letter, signal) {
+    if (await isChunkLoaded(letter)) return true;
+    const url = './dict-chunks/dict-' + letter + '.json';
+    const resp = await fetch(url, { signal });
+    if (!resp.ok) return false;
+    const data = await resp.json();
+    const db = await openDictDB();
+    return new Promise((resolve) => {
+        const tx = db.transaction('words', 'readwrite');
+        const store = tx.objectStore('words');
+        let count = 0;
+        for (const [word, entry] of Object.entries(data)) {
+            store.put(entry, word);
+            count++;
+        }
+        tx.oncomplete = () => {
+            markChunkLoaded(letter);
+            console.log('[词典] 已加载分片 [' + letter + ']: ' + count + ' 词');
+            resolve(true);
+        };
+        tx.onerror = () => resolve(false);
+    });
+}
+
+// 从 IndexedDB 查询单词
+async function queryDictDB(word) {
+    const db = await openDictDB();
+    return new Promise((resolve) => {
+        const req = db.transaction('words', 'readonly').objectStore('words').get(word.toLowerCase());
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+    });
+}
+
+// 获取已加载分片统计
+async function getDictStats() {
+    const db = await openDictDB();
+    return new Promise((resolve) => {
+        const tx = db.transaction(['meta', 'words'], 'readonly');
+        const metaReq = tx.objectStore('meta').getAllKeys();
+        const wordCount = tx.objectStore('words').count();
+        metaReq.onsuccess = () => {
+            wordCount.onsuccess = () => {
+                resolve({ chunks: metaReq.result.length, words: wordCount.result });
+            };
+        };
+        metaReq.onerror = () => resolve({ chunks: 0, words: 0 });
+    });
+}
+
+// 页面加载时预载常用词典
 window.addEventListener('load', () => { loadEmbeddedDict(); });
 
 // 检测是否在本地环境（有本地代理服务器）
@@ -2415,16 +2503,35 @@ const IS_LOCAL = location.hostname === 'localhost' || location.hostname === '127
 // CORS 代理（用于线上环境访问不支持 CORS 的 API）
 const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
 
-// 中文翻译（内嵌词典 → 本地代理 → 线上 API）
+// 中文翻译（常用词典 → IndexedDB完整词典 → 在线API）
 async function fetchTranslate(word, signal) {
-    // 1. 先查内嵌词典（离线即时返回）
+    const wordLower = word.toLowerCase();
+
+    // 1. 先查常用词典（455词，即时返回）
     await loadEmbeddedDict();
-    if (embeddedDict) {
-        const local = embeddedDict[word.toLowerCase()];
-        if (local) return { translation: local };
+    if (embeddedDict && embeddedDict[wordLower]) {
+        return { translation: embeddedDict[wordLower] };
     }
 
-    // 2. 再查在线 API
+    // 2. 查 IndexedDB 完整词典（770K词）
+    const firstChar = wordLower[0];
+    if (/^[a-z]$/.test(firstChar)) {
+        try {
+            if (!(await isChunkLoaded(firstChar))) {
+                showDictHint('loading', '正在加载词典 [' + firstChar.toUpperCase() + '] 分片...');
+                await loadChunk(firstChar, signal);
+            }
+            const result = await queryDictDB(wordLower);
+            if (result && result.t) {
+                return { translation: result.t, phonetic: result.p || '' };
+            }
+        } catch (e) {
+            if (e.name === 'AbortError') throw e;
+            console.log('[词典] IndexedDB 查询失败:', e);
+        }
+    }
+
+    // 3. 回退到在线 API
     if (IS_LOCAL) {
         // 本地：通过代理服务器
         try {
