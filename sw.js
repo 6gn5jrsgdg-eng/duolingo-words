@@ -3,7 +3,7 @@
 // 功能：离线缓存 + 资源回退
 // ============================================
 
-const CACHE_NAME = 'duo-words-v1';
+const CACHE_NAME = 'duo-words-v2';
 const CORE_ASSETS = [
     './duolingo-words.html',
     './manifest.json',

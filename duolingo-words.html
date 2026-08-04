@@ -370,6 +370,77 @@
             transform: scale(1.1);
         }
 
+        /* ===== 音标显示 ===== */
+        .word-phonetic {
+            font-size: 14px;
+            color: var(--duo-blue);
+            font-family: 'Courier New', monospace;
+            margin-top: 3px;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .phonetic-placeholder {
+            font-size: 12px;
+            color: var(--duo-gray);
+            font-style: italic;
+            cursor: pointer;
+        }
+
+        .phonetic-placeholder:hover {
+            color: var(--duo-blue);
+            text-decoration: underline;
+        }
+
+        .flashcard-phonetic {
+            font-size: 18px;
+            color: var(--duo-blue);
+            font-family: 'Courier New', monospace;
+            font-weight: 600;
+            margin-top: 8px;
+        }
+
+        .accent-toggle {
+            display: inline-flex;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 2px solid var(--duo-border);
+        }
+
+        .accent-btn {
+            padding: 5px 12px;
+            border: none;
+            background: white;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 700;
+            font-family: inherit;
+            transition: all 0.15s;
+            color: var(--duo-text-light);
+        }
+
+        .accent-btn.active {
+            background: var(--duo-blue);
+            color: white;
+        }
+
+        .speak-group {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .speak-accent-label {
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--duo-text-light);
+            background: var(--duo-gray-light);
+            padding: 2px 5px;
+            border-radius: 4px;
+        }
+
         .word-translation {
             font-size: 16px;
             color: var(--duo-text-light);
@@ -1040,6 +1111,7 @@
         <h1>生词收集器</h1>
     </div>
     <div class="header-actions">
+        <button class="icon-btn" onclick="openVoiceSettings()" title="发音设置">🗣</button>
         <button class="icon-btn" onclick="exportData()" title="导出数据">📥</button>
         <button class="icon-btn" onclick="document.getElementById('importFile').click()" title="导入数据">📤</button>
         <input type="file" id="importFile" accept=".json" onchange="importData(event)">
@@ -1256,9 +1328,63 @@
             <label>笔记</label>
             <input type="text" id="editNotes">
         </div>
+        <div class="input-group">
+            <label>音标</label>
+            <div style="display:flex;gap:8px;">
+                <input type="text" id="editPhonetic" placeholder="/ˈfəʊnɪk/">
+                <button class="btn btn-sm btn-blue" onclick="fetchPhoneticForEdit()" style="white-space:nowrap;">查询</button>
+            </div>
+        </div>
         <div class="modal-actions">
             <button class="btn btn-outline" style="flex:1;" onclick="closeEditModal()">取消</button>
             <button class="btn btn-primary" style="flex:1;" onclick="saveEdit()">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===== 发音设置弹窗 ===== -->
+<div class="modal-overlay" id="voiceModal">
+    <div class="modal">
+        <div class="modal-title">🗣 发音设置</div>
+
+        <div class="input-group">
+            <label>口音</label>
+            <div class="accent-toggle" style="width:100%;">
+                <button class="accent-btn active" data-accent="US" onclick="setAccent('US')" style="flex:1;">🇺🇸 美式英语</button>
+                <button class="accent-btn" data-accent="GB" onclick="setAccent('GB')" style="flex:1;">🇬🇧 英式英语</button>
+            </div>
+        </div>
+
+        <div class="input-group">
+            <label>音色（语音引擎）</label>
+            <select id="voiceSelect" onchange="setVoice(this.value)" style="width:100%;border:2px solid var(--duo-border);border-radius:12px;padding:10px 14px;font-size:15px;font-family:inherit;background:white;">
+                <option value="">加载中...</option>
+            </select>
+        </div>
+
+        <div class="input-group">
+            <label>语速: <span id="rateValue">0.9</span>x</label>
+            <input type="range" id="rateSlider" min="0.5" max="1.5" step="0.1" value="0.9" oninput="setRate(this.value)" style="width:100%;">
+        </div>
+
+        <div style="margin-bottom:16px;">
+            <button class="btn btn-blue btn-full" onclick="testVoice()">🔊 试听发音</button>
+        </div>
+
+        <div class="input-group">
+            <label>音标自动获取</label>
+            <p style="font-size:13px;color:var(--duo-text-light);line-height:1.5;">
+                添加单词时自动从在线词典查询音标（需联网）。<br>
+                支持查询的单词以英语为主。
+            </p>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+                <input type="checkbox" id="autoPhoneticToggle" onchange="toggleAutoPhonetic(this.checked)" style="width:18px;height:18px;">
+                <label for="autoPhoneticToggle" style="margin:0;font-size:14px;text-transform:none;letter-spacing:0;cursor:pointer;">添加单词时自动查音标</label>
+            </div>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn btn-primary btn-full" onclick="closeVoiceSettings()">完成</button>
         </div>
     </div>
 </div>
@@ -1334,6 +1460,8 @@ function addWord() {
         translation: translation,
         example: example,
         notes: notes,
+        phonetic: '',
+        audioUrl: '',
         date: getTodayStr(),
         timestamp: Date.now(),
         status: 'new'
@@ -1351,6 +1479,11 @@ function addWord() {
 
     showToast('单词已添加！', 'success');
     renderToday();
+
+    // 自动查询音标
+    if (settings.autoPhonetic) {
+        fetchPhoneticForCard(newWord.id);
+    }
 }
 
 // ============================================
@@ -1390,6 +1523,9 @@ function renderWordCard(w) {
             <div class="word-header">
                 <div>
                     <div class="word-text">${escapeHtml(w.word)}<button class="speak-btn" onclick="speakWord('${escapeAttr(w.word)}')" title="朗读">🔊</button></div>
+                    ${w.phonetic
+                        ? `<div class="word-phonetic">${escapeHtml(w.phonetic)}${w.audioUrl ? ` <button class="speak-btn" style="width:22px;height:22px;font-size:11px;" onclick="playAudioUrl('${escapeAttr(w.audioUrl)}')" title="词典原声">🎵</button>` : ''}</div>`
+                        : `<div class="word-phonetic"><span class="phonetic-placeholder" onclick="fetchPhoneticForCard('${w.id}')">查询音标</span></div>`}
                     <div class="word-translation">${escapeHtml(w.translation)}</div>
                 </div>
                 <span class="status-badge ${st.class}">${st.label}</span>
@@ -1514,6 +1650,7 @@ function openEditModal(id) {
     document.getElementById('editTranslation').value = w.translation;
     document.getElementById('editExample').value = w.example || '';
     document.getElementById('editNotes').value = w.notes || '';
+    document.getElementById('editPhonetic').value = w.phonetic || '';
     document.getElementById('editModal').classList.add('show');
 }
 
@@ -1529,6 +1666,7 @@ function saveEdit() {
     w.translation = document.getElementById('editTranslation').value.trim();
     w.example = document.getElementById('editExample').value.trim();
     w.notes = document.getElementById('editNotes').value.trim();
+    w.phonetic = document.getElementById('editPhonetic').value.trim();
 
     if (!w.word || !w.translation) {
         showToast('单词和释义不能为空', 'error');
@@ -1612,6 +1750,7 @@ function showFlashcard() {
 
     document.getElementById('flashcardContent').innerHTML = `
         <div class="flashcard-word">${escapeHtml(w.word)}</div>
+        ${w.phonetic ? `<div class="flashcard-phonetic">${escapeHtml(w.phonetic)}</div>` : ''}
         <button class="flashcard-speak" onclick="speakWord('${escapeAttr(w.word)}')" title="朗读">🔊</button>
     `;
     document.getElementById('reviewProgress').textContent =
@@ -1628,6 +1767,7 @@ function flipCard() {
         card.classList.add('flipped');
         document.getElementById('flashcardContent').innerHTML = `
             <div class="flashcard-word">${escapeHtml(w.word)}</div>
+            ${w.phonetic ? `<div class="flashcard-phonetic">${escapeHtml(w.phonetic)}</div>` : ''}
             <div class="flashcard-translation">${escapeHtml(w.translation)}</div>
             ${w.example ? `<div class="flashcard-example">${escapeHtml(w.example)}</div>` : ''}
             <button class="flashcard-speak" onclick="speakWord('${escapeAttr(w.word)}')" title="朗读">🔊</button>
@@ -1636,6 +1776,7 @@ function flipCard() {
         card.classList.remove('flipped');
         document.getElementById('flashcardContent').innerHTML = `
             <div class="flashcard-word">${escapeHtml(w.word)}</div>
+            ${w.phonetic ? `<div class="flashcard-phonetic">${escapeHtml(w.phonetic)}</div>` : ''}
             <button class="flashcard-speak" onclick="speakWord('${escapeAttr(w.word)}')" title="朗读">🔊</button>
         `;
     }
@@ -1859,40 +2000,245 @@ function escapeAttr(str) {
 }
 
 // ============================================
-// 单词发音（Web Speech API）
+// 单词发音 + 音标 + 音色设置（Web Speech API + 词典 API）
 // ============================================
+const SETTINGS_KEY = 'duo_words_settings';
+let settings = { accent: 'US', voiceURI: '', rate: 0.9, autoPhonetic: true };
+let availableVoices = [];
+
+function loadSettings() {
+    const s = localStorage.getItem(SETTINGS_KEY);
+    if (s) {
+        try { settings = Object.assign(settings, JSON.parse(s)); } catch(e) {}
+    }
+}
+
+function saveSettings() {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+// 加载语音引擎列表
+function loadVoices() {
+    if (!('speechSynthesis' in window)) return;
+    availableVoices = window.speechSynthesis.getVoices();
+    updateVoiceSelect();
+}
+
+function updateVoiceSelect() {
+    const select = document.getElementById('voiceSelect');
+    if (!select) return;
+
+    // 按口音筛选英语语音
+    const langPrefix = settings.accent === 'US' ? 'en-US' : 'en-GB';
+    let filtered = availableVoices.filter(v => v.lang === langPrefix);
+
+    // 如果该口音没有语音，退回到所有英语语音
+    if (filtered.length === 0) {
+        filtered = availableVoices.filter(v => v.lang.startsWith('en'));
+    }
+
+    if (filtered.length === 0) {
+        select.innerHTML = '<option value="">未找到英语语音引擎</option>';
+        return;
+    }
+
+    select.innerHTML = filtered.map(v => {
+        const selected = v.voiceURI === settings.voiceURI ? 'selected' : '';
+        const flag = v.lang.startsWith('en-US') ? '🇺🇸' : v.lang.startsWith('en-GB') ? '🇬🇧' : '🌐';
+        return `<option value="${v.voiceURI}" ${selected}>${flag} ${v.name} (${v.lang})</option>`;
+    }).join('');
+
+    // 如果没选过或选的语音不在列表里，默认选第一个
+    if (!settings.voiceURI || !filtered.some(v => v.voiceURI === settings.voiceURI)) {
+        settings.voiceURI = filtered[0].voiceURI;
+        saveSettings();
+    }
+}
+
+// 设置口音
+function setAccent(accent) {
+    settings.accent = accent;
+    // 清除已选语音，让 updateVoiceSelect 自动选该口音的第一个
+    settings.voiceURI = '';
+    saveSettings();
+    document.querySelectorAll('.accent-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.accent === accent);
+    });
+    loadVoices();
+}
+
+// 设置音色
+function setVoice(uri) {
+    settings.voiceURI = uri;
+    saveSettings();
+}
+
+// 设置语速
+function setRate(val) {
+    settings.rate = parseFloat(val);
+    document.getElementById('rateValue').textContent = settings.rate.toFixed(1);
+    saveSettings();
+}
+
+// 切换自动音标
+function toggleAutoPhonetic(checked) {
+    settings.autoPhonetic = checked;
+    saveSettings();
+}
+
+// 打开发音设置
+function openVoiceSettings() {
+    document.getElementById('voiceModal').classList.add('show');
+    // 初始化 UI
+    document.querySelectorAll('.accent-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.accent === settings.accent);
+    });
+    document.getElementById('rateSlider').value = settings.rate;
+    document.getElementById('rateValue').textContent = settings.rate.toFixed(1);
+    document.getElementById('autoPhoneticToggle').checked = settings.autoPhonetic;
+    loadVoices();
+}
+
+function closeVoiceSettings() {
+    document.getElementById('voiceModal').classList.remove('show');
+}
+
+// 试听
+function testVoice() {
+    speakWord('serendipity, beautiful, pronunciation');
+}
+
+// 发音
 function speakWord(word) {
     if (!('speechSynthesis' in window)) {
         showToast('浏览器不支持语音功能', 'error');
         return;
     }
 
-    // 停止正在播放的语音
     window.speechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(word);
-    utterance.lang = 'en-US';
-    utterance.rate = 0.9;
+    utterance.lang = settings.accent === 'US' ? 'en-US' : 'en-GB';
+    utterance.rate = settings.rate;
     utterance.pitch = 1;
 
-    // 尝试选择英语语音引擎
-    const voices = window.speechSynthesis.getVoices();
-    const enVoice = voices.find(v => v.lang.startsWith('en'));
-    if (enVoice) utterance.voice = enVoice;
+    // 选择指定音色
+    if (settings.voiceURI) {
+        const voice = availableVoices.find(v => v.voiceURI === settings.voiceURI);
+        if (voice) utterance.voice = voice;
+    } else {
+        // 没选过就按口音自动匹配
+        const langPrefix = settings.accent === 'US' ? 'en-US' : 'en-GB';
+        const voice = availableVoices.find(v => v.lang === langPrefix) ||
+                       availableVoices.find(v => v.lang.startsWith('en'));
+        if (voice) utterance.voice = voice;
+    }
 
     window.speechSynthesis.speak(utterance);
 }
 
-// 语音引擎加载（部分浏览器需要异步加载）
+// 语音引擎加载（部分浏览器异步）
 if ('speechSynthesis' in window) {
-    window.speechSynthesis.onvoiceschanged = () => {
-        window.speechSynthesis.getVoices();
-    };
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+}
+
+// ============================================
+// 音标查询（免费词典 API）
+// ============================================
+async function fetchPhonetic(word) {
+    try {
+        const resp = await fetch('https://api.dictionaryapi.dev/api/v2/entries/en/' + encodeURIComponent(word.toLowerCase()));
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        if (!Array.isArray(data) || data.length === 0) return null;
+
+        // 优先找指定口音的音标
+        const targetLang = settings.accent === 'US' ? 'en-US' : 'en-GB';
+        let phonetic = '';
+        let audioUrl = '';
+
+        // 遍历查找
+        for (const entry of data) {
+            // 顶层 phonetic
+            if (entry.phonetic && !phonetic) phonetic = entry.phonetic;
+
+            if (entry.phonetics) {
+                for (const p of entry.phonetics) {
+                    // 匹配口音的音标优先
+                    if (p.text) {
+                        if (!phonetic) phonetic = p.text;
+                        // 如果有口音标注且匹配，优先取
+                        if (entry.phonetics && p.text && (p.text.includes(targetLang) ||
+                            (entry.phonetic && entry.phonetic === p.text))) {
+                            phonetic = p.text;
+                        }
+                    }
+                    // 匹配口音的音频
+                    if (p.audio && p.audio.startsWith('https:') && !audioUrl) {
+                        audioUrl = p.audio;
+                    }
+                }
+            }
+        }
+
+        return { phonetic: phonetic || '', audioUrl: audioUrl || '' };
+    } catch (err) {
+        return null;
+    }
+}
+
+// 单词卡片上点击查音标
+async function fetchPhoneticForCard(id) {
+    const w = words.find(w => w.id === id);
+    if (!w) return;
+    showToast('正在查询音标...', '');
+    const result = await fetchPhonetic(w.word);
+    if (result && result.phonetic) {
+        w.phonetic = result.phonetic;
+        if (result.audioUrl) w.audioUrl = result.audioUrl;
+        saveData();
+        renderToday();
+        renderWordbook();
+        showToast('音标已获取', 'success');
+    } else {
+        showToast('未找到该单词的音标', 'error');
+    }
+}
+
+// 编辑弹窗查音标
+async function fetchPhoneticForEdit() {
+    const word = document.getElementById('editWord').value.trim();
+    if (!word) {
+        showToast('请先输入单词', 'error');
+        return;
+    }
+    showToast('正在查询音标...', '');
+    const result = await fetchPhonetic(word);
+    if (result && result.phonetic) {
+        document.getElementById('editPhonetic').value = result.phonetic;
+        showToast('音标已获取', 'success');
+    } else {
+        showToast('未找到该单词的音标', 'error');
+    }
+}
+
+// 播放词典音频（如果有）
+function playAudioUrl(url) {
+    if (!url) {
+        showToast('没有词典音频', 'error');
+        return;
+    }
+    const audio = new Audio(url);
+    audio.play().catch(() => {
+        showToast('音频播放失败', 'error');
+    });
 }
 
 // ============================================
 // 启动
 // ============================================
+loadSettings();
 loadData();
 renderToday();
 renderWordbook();
@@ -1903,6 +2249,7 @@ renderStats();
 document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
         closeEditModal();
+        closeVoiceSettings();
     }
 });
 
