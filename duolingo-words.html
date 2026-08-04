@@ -2574,45 +2574,56 @@ async function lookupWord(word) {
 }
 
 // 后台补充例句和发音（不阻塞用户操作）
+// 优化：例句生成和词典查询并行执行，例句优先更新UI
 async function enrichInBackground(word, parentSignal, result) {
-    try {
-        const enrichController = new AbortController();
-        parentSignal.addEventListener('abort', () => enrichController.abort());
+    const enrichController = new AbortController();
+    parentSignal.addEventListener('abort', () => enrichController.abort());
 
-        // 阶段1: 优先用 MyMemory 生成双语例句（在中国最可靠）
-        if (result.translation) {
-            const generated = await generateExamples(word, result.translation, enrichController.signal);
-            if (generated && generated.length > 0) {
-                result.examples = generated;
-            }
-        }
-
-        // 阶段2: 后台尝试 dictionaryapi.dev 获取发音和英文释义（可选）
-        const shortTimeout = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('timeout')), 5000)
-        );
-
+    // 并行启动：例句生成 + 英文词典查询
+    const examplePromise = (async () => {
+        if (!result.translation) return null;
         try {
-            const dict = await Promise.race([fetchDictEnglish(word, enrichController.signal), shortTimeout]);
-            if (dict) {
-                if (dict.audioUrl && !result.audioUrl) {
-                    result.audioUrl = dict.audioUrl;
-                }
-                if (dict.definitions && dict.definitions.length > 0 && result.definitions.length === 0) {
-                    result.definitions = dict.definitions;
-                }
-            }
-        } catch (e) { /* 超时或失败，静默忽略 */ }
+            return await generateExamples(word, result.translation, enrichController.signal);
+        } catch (e) { return null; }
+    })();
 
-        // 标记例句加载完成
-        result.examplesLoading = false;
+    const dictPromise = (async () => {
+        try {
+            const shortTimeout = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('timeout')), 5000)
+            );
+            return await Promise.race([fetchDictEnglish(word, enrichController.signal), shortTimeout]);
+        } catch (e) { return null; }
+    })();
 
-        if (lastDictResult && lastDictResult.word === word) {
-            lastDictResult = result;
-            showDictResult(result);
+    // 等例句生成（用户最关心），整体最多等 8 秒
+    const exampleTimeout = new Promise(resolve => setTimeout(() => resolve(null), 8000));
+    const generated = await Promise.race([examplePromise, exampleTimeout]);
+
+    if (generated && generated.length > 0) {
+        result.examples = generated;
+    } else if (result.definitions && result.definitions.length > 0) {
+        // 后备方案：API 失败时，用 ECDICT 英文释义 + 中文翻译构造简单例句
+        const def = result.definitions[0].definition;
+        if (def && def.length > 5) {
+            result.examples = [def + '\n' + (result.translation || '')];
         }
-    } catch (e) {
-        result.examplesLoading = false;
+    }
+    result.examplesLoading = false;
+
+    // 立即更新 UI（不等英文词典结果）
+    if (lastDictResult && lastDictResult.word === word) {
+        lastDictResult = result;
+        showDictResult(result);
+    }
+
+    // 后台继续获取英文词典（发音、英文释义补充）
+    const dict = await dictPromise;
+    if (dict) {
+        if (dict.audioUrl && !result.audioUrl) result.audioUrl = dict.audioUrl;
+        if (dict.definitions && dict.definitions.length > 0 && result.definitions.length === 0) {
+            result.definitions = dict.definitions;
+        }
         if (lastDictResult && lastDictResult.word === word) {
             lastDictResult = result;
             showDictResult(result);
@@ -2812,61 +2823,57 @@ async function fetchTranslate(word, signal) {
 }
 
 // 用 MyMemory API 生成双语例句（在中国可用的可靠方案）
+// 优化：并行请求 + 单请求6秒超时，大幅提升速度
 async function generateExamples(word, translation, signal) {
-    // 根据中文翻译推断词性，选择合适的句型
     const trans = translation || '';
-    const isNoun = /(^|[,;\s])n\./.test(trans) || /名词/.test(trans);
-    const isVerb = /(^|[,;\s])(v|vi|vt)\./.test(trans) || /动词/.test(trans);
-    const isAdj = /(^|[,;\s])adj\./.test(trans) || /形容词/.test(trans);
+    const isNoun = /n\.|名词/.test(trans);
+    const isVerb = /(v|vi|vt)\.|动词/.test(trans);
+    const isAdj = /adj\.|形容词/.test(trans);
 
-    // 构造包含目标单词的英文句子
+    // 构造包含目标单词的英文句子（2个模板，并行翻译）
     let templates = [];
     if (isNoun) {
         templates = [
             'I bought a ' + word + ' yesterday.',
-            'This ' + word + ' is very useful.',
-            'She showed me her new ' + word + '.'
+            'This ' + word + ' is very useful.'
         ];
     } else if (isVerb) {
         templates = [
             'I ' + word + ' every day.',
-            'She likes to ' + word + ' in the morning.',
-            'They will ' + word + ' together.'
+            'She likes to ' + word + ' in the morning.'
         ];
     } else if (isAdj) {
         templates = [
             'The weather is ' + word + ' today.',
-            'He looks very ' + word + '.',
-            'This book is quite ' + word + '.'
+            'He looks very ' + word + '.'
         ];
     } else {
-        // 通用句型
         templates = [
             'I learned the word "' + word + '" today.',
-            'Can you use "' + word + '" in a sentence?',
-            'I think ' + word + ' is interesting.'
+            'Can you use "' + word + '" in a sentence?'
         ];
     }
 
-    const examples = [];
-    for (const enSentence of templates.slice(0, 3)) {
+    // 并行翻译所有模板，每个请求 6 秒超时
+    const results = await Promise.all(templates.map(async (enSentence) => {
         try {
             const url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(enSentence) + '&langpair=en|zh';
-            const resp = await fetch(url, { signal });
+            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 6000));
+            const resp = await Promise.race([fetch(url, { signal }), timeout]);
             if (resp.ok) {
                 const data = await resp.json();
                 if (data && data.responseData && data.responseData.translatedText) {
                     const zhSentence = data.responseData.translatedText;
-                    // 确保翻译包含中文
                     if (/[\u4e00-\u9fff]/.test(zhSentence)) {
-                        examples.push(enSentence + '\n' + zhSentence);
+                        return enSentence + '\n' + zhSentence;
                     }
                 }
             }
-        } catch (e) { /* 继续下一句 */ }
-        if (examples.length >= 2) break;
-    }
+        } catch (e) { /* 忽略单个失败 */ }
+        return null;
+    }));
 
+    const examples = results.filter(r => r !== null);
     return examples.length > 0 ? examples : null;
 }
 
