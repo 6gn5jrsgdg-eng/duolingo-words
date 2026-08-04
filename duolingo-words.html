@@ -2389,7 +2389,14 @@ async function lookupByChinese(query) {
 
     try {
         // 阶段1: 查本地迷你反查词典（即时返回）
-        const dict = await loadMiniReverseDict();
+        // 如果词典还在加载中，等待最多 5 秒
+        let dict = miniReverseDict;
+        if (!dict) {
+            dict = await Promise.race([
+                loadMiniReverseDict(),
+                new Promise(resolve => setTimeout(() => resolve(null), 5000))
+            ]);
+        }
         let results = [];
 
         if (dict) {
