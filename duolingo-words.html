@@ -2351,7 +2351,7 @@ document.getElementById('wordInput').addEventListener('input', function(e) {
             hideDictHint();
             return;
         }
-        dictLookupTimer = setTimeout(() => lookupWord(word), 400);
+        dictLookupTimer = setTimeout(() => lookupWord(word), 300);
     } else {
         hideDictHint();
     }
@@ -2523,9 +2523,9 @@ async function lookupWord(word) {
             return;
         }
 
-        // === 第三阶段：IndexedDB 未命中，并行查询在线 API ===
+        // === 第三阶段：IndexedDB 未命中，快速尝试在线API（3秒超时）===
         const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('timeout')), 8000)
+            setTimeout(() => reject(new Error('timeout')), 3000)
         );
 
         const [dictResult, examplesResult] = await Promise.allSettled([
@@ -2785,11 +2785,14 @@ async function fetchTranslate(word, signal) {
         } catch (e) { /* 回退到线上方案 */ }
     }
 
-    // 线上：直接调用 MyMemory 句子翻译
+    // 线上：直接调用 MyMemory 句子翻译（3秒超时，被墙时快速失败）
     try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
         const sentence = "The meaning of the word '" + word + "' is";
         const url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(sentence) + '&langpair=en|zh';
-        const resp = await fetch(url, { signal });
+        const resp = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
         if (resp.ok) {
             const data = await resp.json();
             if (data && data.responseData && data.responseData.translatedText) {
@@ -2801,7 +2804,7 @@ async function fetchTranslate(word, signal) {
                 }
                 // 回退：直接单词翻译
                 const url2 = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(word) + '&langpair=en|zh';
-                const resp2 = await fetch(url2, { signal });
+                const resp2 = await fetch(url2, { signal: controller.signal });
                 if (resp2.ok) {
                     const data2 = await resp2.json();
                     if (data2 && data2.responseData && data2.responseData.translatedText) {
