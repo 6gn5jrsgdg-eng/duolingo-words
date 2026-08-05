@@ -2889,23 +2889,32 @@ async function buildLocalExamples(word, translation) {
     try {
         const firstChar = wordLower[0];
         if (/^[a-z]$/.test(firstChar)) {
-            if (!(await isChunkLoaded(firstChar))) {
-                await loadChunk(firstChar);
+            const loaded = await isChunkLoaded(firstChar);
+            console.log('[例句后备] 分片', firstChar, '已加载:', loaded);
+            if (!loaded) {
+                console.log('[例句后备] 正在加载分片', firstChar);
+                const ok = await loadChunk(firstChar);
+                console.log('[例句后备] 分片加载结果:', ok);
             }
             const dbResult = await queryDictDB(wordLower);
+            console.log('[例句后备] IndexedDB查询:', wordLower, '→', dbResult ? JSON.stringify(dbResult).substring(0, 200) : 'null');
             if (dbResult && dbResult.d) {
-                // 取第一行英文释义作为例句
-                const firstDef = dbResult.d.split('\\n')[0].trim();
+                // 取第一行英文释义作为例句（用换行符分割）
+                const firstDef = dbResult.d.split('\n')[0].trim();
+                console.log('[例句后备] 英文释义:', firstDef);
                 if (firstDef.length > 3) {
                     const zh = translation || dbResult.t || '';
                     examples.push(firstDef + '\n' + zh);
                 }
             }
         }
-    } catch (e) { /* 忽略 IndexedDB 错误 */ }
+    } catch (e) {
+        console.log('[例句后备] IndexedDB错误:', e.message);
+    }
 
     // 2. 如果没有释义，用模板构造简单双语例句
     if (examples.length === 0 && translation) {
+        console.log('[例句后备] 使用模板构造例句');
         const cleanTrans = translation.replace(/^(n|v|vi|vt|adj|adv|prep|conj|pron|art|num|abbr|int|aux)\.\s*/, '').split(/[;,，；]/)[0].trim();
         const isNoun = /^n\./.test(translation);
         const isVerb = /^(v|vi|vt)\./.test(translation);
@@ -2922,6 +2931,7 @@ async function buildLocalExamples(word, translation) {
         }
     }
 
+    console.log('[例句后备] 最终结果:', examples.length, '条例句');
     return examples.length > 0 ? examples : null;
 }
 
