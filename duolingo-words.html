@@ -450,8 +450,8 @@
             background: var(--duo-blue-light);
             border-radius: 8px;
             margin-top: 6px;
-            align-items: center;
-            gap: 6px;
+            flex-direction: column;
+            gap: 4px;
         }
 
         .dict-hint.show {
@@ -466,6 +466,13 @@
         .dict-hint.error {
             background: var(--duo-red-light);
             color: var(--duo-red);
+        }
+
+        .dict-result-row1, .dict-result-row2 {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
         }
 
         .dict-spinner {
@@ -3133,32 +3140,39 @@ function showDictResult(result) {
     const hint = document.getElementById('dictHint');
     hint.className = 'dict-hint show success';
 
-    let html = '<span>📖</span>';
-
-    // 音标
+    let html = '<div class="dict-result-row1">';
+    html += '<span>📖</span>';
+    // 单词
+    html += '<strong style="font-size:14px;">' + escapeHtml(result.word) + '</strong>';
+    // 音标（紧跟单词后面）
     if (result.phonetic) {
-        html += '<span style="font-family:monospace;font-weight:600;">' + escapeHtml(result.phonetic) + '</span>';
+        html += '<span style="font-family:monospace;font-weight:600;opacity:0.85;">' + escapeHtml(result.phonetic) + '</span>';
     }
+    // 朗读按钮
+    html += '<button class="speak-btn" style="width:22px;height:22px;font-size:11px;" onclick="speakWord(\'' + result.word.replace(/'/g, "\\'") + '\')" title="朗读">🔊</button>';
+    html += '</div>';
 
+    let html2 = '<div class="dict-result-row2">';
     // 释义预览
     if (result.translation) {
-        const preview = result.translation.length > 35
-            ? result.translation.substring(0, 35) + '...'
+        const preview = result.translation.length > 40
+            ? result.translation.substring(0, 40) + '...'
             : result.translation;
-        html += '<span>' + escapeHtml(preview) + '</span>';
+        html2 += '<span>' + escapeHtml(preview) + '</span>';
     }
 
     // 例句数量 / 加载状态
     if (result.examples && result.examples.length > 0) {
-        html += '<span>📝 ' + result.examples.length + '条例句</span>';
+        html2 += '<span>📝 ' + result.examples.length + '条例句</span>';
     } else if (result.examplesLoading) {
-        html += '<span style="opacity:0.6;">📝 例句加载中...</span>';
+        html2 += '<span style="opacity:0.6;">📝 例句加载中...</span>';
     }
 
     // 自动填充按钮
-    html += '<button class="auto-fill-badge" onclick="applyDictResult()">⚡ 自动填充</button>';
+    html2 += '<button class="auto-fill-badge" onclick="applyDictResult()">⚡ 自动填充</button>';
+    html2 += '</div>';
 
-    hint.innerHTML = html;
+    hint.innerHTML = html + html2;
 }
 
 function applyDictResult() {
