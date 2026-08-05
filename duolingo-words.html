@@ -2351,7 +2351,7 @@ document.getElementById('wordInput').addEventListener('input', function(e) {
             hideDictHint();
             return;
         }
-        dictLookupTimer = setTimeout(() => lookupWord(word), 600);
+        dictLookupTimer = setTimeout(() => lookupWord(word), 400);
     } else {
         hideDictHint();
     }
@@ -2503,13 +2503,14 @@ async function lookupWord(word) {
         const fastResult = await fetchTranslate(word, signal);
 
         if (fastResult && fastResult.translation) {
-            // IndexedDB/常用词典命中，立即显示结果（不含例句，后台补充）
+            // IndexedDB/常用词典命中，立即生成本地例句并显示
+            const localExamples = await buildLocalExamples(word, fastResult.translation);
             const result = {
                 word: word,
                 translation: fastResult.translation,
                 phonetic: fastResult.phonetic || '',
                 audioUrl: '',
-                examples: [],
+                examples: localExamples || [],
                 examplesLoading: true,
                 definitions: fastResult.definition ? fastResult.definition.split('\n').filter(d => d.trim()).map(d => ({pos: '', definition: d.trim()})) : []
             };
@@ -2517,7 +2518,7 @@ async function lookupWord(word) {
             lastDictResult = result;
             showDictResult(result);
 
-            // === 第二阶段：后台补充例句和发音（不阻塞界面）===
+            // === 第二阶段：后台尝试获取更好的例句和发音（不阻塞界面）===
             enrichInBackground(word, signal, result);
             return;
         }
@@ -2574,7 +2575,7 @@ async function lookupWord(word) {
 }
 
 // 后台补充例句和发音（不阻塞用户操作）
-// 优化：例句生成和词典查询并行执行，例句优先更新UI
+// 优化：本地例句已提前显示，API成功时替换为更好的例句
 async function enrichInBackground(word, parentSignal, result) {
     const enrichController = new AbortController();
     parentSignal.addEventListener('abort', () => enrichController.abort());
@@ -2596,22 +2597,17 @@ async function enrichInBackground(word, parentSignal, result) {
         } catch (e) { return null; }
     })();
 
-    // 等例句生成（用户最关心），整体最多等 6 秒
+    // 等API例句，最多 6 秒
     const exampleTimeout = new Promise(resolve => setTimeout(() => resolve(null), 6000));
     const generated = await Promise.race([examplePromise, exampleTimeout]);
 
+    // API成功 → 替换为更好的例句；API失败 → 保留已有的本地例句
     if (generated && generated.length > 0) {
         result.examples = generated;
-    } else {
-        // API 失败/超时：使用本地后备方案（从ECDICT获取释义或模板构造）
-        const localExamples = await buildLocalExamples(word, result.translation);
-        if (localExamples && localExamples.length > 0) {
-            result.examples = localExamples;
-        }
     }
     result.examplesLoading = false;
 
-    // 立即更新 UI（不等英文词典结果）
+    // 更新 UI
     if (lastDictResult && lastDictResult.word === word) {
         lastDictResult = result;
         showDictResult(result);
