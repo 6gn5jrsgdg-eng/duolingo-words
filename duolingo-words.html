@@ -2509,14 +2509,13 @@ async function lookupWord(word) {
         clearTimeout(hintTimer);
 
         if (fastResult && fastResult.translation) {
-            // IndexedDB/常用词典命中，立即生成本地例句并显示
-            const localExamples = await buildLocalExamples(word, fastResult.translation, fastResult.definition);
+            // 词典命中，立即显示结果（不等例句，避免手机上加载大分片卡住）
             const result = {
                 word: word,
                 translation: fastResult.translation,
                 phonetic: fastResult.phonetic || '',
                 audioUrl: '',
-                examples: localExamples || [],
+                examples: [],
                 examplesLoading: true,
                 definitions: fastResult.definition ? fastResult.definition.split('\n').filter(d => d.trim()).map(d => ({pos: '', definition: d.trim()})) : []
             };
@@ -2524,7 +2523,7 @@ async function lookupWord(word) {
             lastDictResult = result;
             showDictResult(result);
 
-            // === 第二阶段：后台尝试获取更好的例句和发音（不阻塞界面）===
+            // === 第二阶段：后台生成本地例句 + 获取更好的例句和发音（不阻塞界面）===
             enrichInBackground(word, signal, result);
             return;
         }
@@ -2583,12 +2582,24 @@ async function lookupWord(word) {
 }
 
 // 后台补充例句和发音（不阻塞用户操作）
-// 优化：本地例句已提前显示，API成功时替换为更好的例句
+// 优化：先快速生成本地模板例句，API成功时替换为更好的例句
 async function enrichInBackground(word, parentSignal, result) {
     const enrichController = new AbortController();
     parentSignal.addEventListener('abort', () => enrichController.abort());
 
-    // 并行启动：例句生成 + 英文词典查询
+    // 步骤1：立即生成本地模板例句（无需网络，无需加载大分片）
+    if (result.examples.length === 0 && result.translation) {
+        const templateExamples = buildTemplateExamples(word, result.translation);
+        if (templateExamples && templateExamples.length > 0) {
+            result.examples = templateExamples;
+            if (lastDictResult && lastDictResult.word === word) {
+                lastDictResult = result;
+                showDictResult(result);
+            }
+        }
+    }
+
+    // 步骤2：并行启动 API 例句生成 + 英文词典查询
     const examplePromise = (async () => {
         if (!result.translation) return null;
         try {
@@ -2605,7 +2616,21 @@ async function enrichInBackground(word, parentSignal, result) {
         } catch (e) { return null; }
     })();
 
-    // 等API例句，最多 6 秒
+    // 步骤3：后台尝试从 IndexedDB 获取英文释义（可能需要加载分片，不阻塞）
+    if (result.definitions.length === 0) {
+        buildLocalExamples(word, result.translation, null).then(localExamples => {
+            if (localExamples && localExamples.length > 0 && lastDictResult && lastDictResult.word === word) {
+                // 仅补充英文释义例句，不覆盖已有的模板例句
+                if (!result.examples.find(e => e === localExamples[0])) {
+                    result.examples = [...localExamples, ...result.examples];
+                    lastDictResult = result;
+                    showDictResult(result);
+                }
+            }
+        }).catch(() => {});
+    }
+
+    // 等API例句，最多 4 秒
     const exampleTimeout = new Promise(resolve => setTimeout(() => resolve(null), 4000));
     const generated = await Promise.race([examplePromise, exampleTimeout]);
 
@@ -2767,7 +2792,11 @@ async function fetchTranslate(word, signal) {
         try {
             if (!(await isChunkLoaded(firstChar))) {
                 showDictHint('loading', '正在加载词典 [' + firstChar.toUpperCase() + '] 分片...');
-                await loadChunk(firstChar, signal);
+                // 加超时保护，防止手机上加载大分片卡死
+                const chunkTimeout = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('chunk_timeout')), 5000)
+                );
+                await Promise.race([loadChunk(firstChar, signal), chunkTimeout]);
             }
             const result = await queryDictDB(wordLower);
             if (result && result.t) {
@@ -2941,6 +2970,29 @@ async function buildLocalExamples(word, translation, definition) {
     }
 
     return examples.length > 0 ? examples : null;
+}
+
+// 纯模板构造例句（同步，无需网络和 IndexedDB，用于即时显示）
+function buildTemplateExamples(word, translation) {
+    if (!translation) return null;
+    const wordLower = word.toLowerCase();
+    const examples = [];
+    const cleanTrans = translation.replace(/^(n|v|vi|vt|adj|adv|prep|conj|pron|art|num|abbr|int|aux)\.\s*/, '').split(/[;,，；]/)[0].trim();
+    const isNoun = /^n\./.test(translation);
+    const isVerb = /^(v|vi|vt)\./.test(translation);
+    const isAdj = /^adj\./.test(translation);
+    const article = /^[aeiou]/.test(wordLower) ? 'an' : 'a';
+
+    if (isNoun) {
+        examples.push('I have ' + article + ' ' + word + '.\n我有一个' + cleanTrans + '。');
+    } else if (isVerb) {
+        examples.push('I ' + word + ' every day.\n我每天' + cleanTrans + '。');
+    } else if (isAdj) {
+        examples.push('This is very ' + word + '.\n这非常' + cleanTrans + '。');
+    } else {
+        examples.push('The word "' + word + '" means ' + cleanTrans + '.\n"' + word + '"的意思是' + cleanTrans + '。');
+    }
+    return examples;
 }
 
 // 双语例句（本地代理 → Tatoeba / 线上通过 CORS 代理）
@@ -3143,19 +3195,23 @@ renderStats();
 
 // 预加载词典资源（不阻塞页面渲染，大幅提升首次查词速度）
 window.addEventListener('load', () => {
-    // 1. 预加载常用词典（455词，即时返回）
+    // 1. 预加载常用词典（455词，小文件，即时返回）
     loadEmbeddedDict();
-    // 2. 预加载中文反查词典（396KB，18372词条）
+    // 2. 预加载中文反查词典（396KB，小文件）
     loadMiniReverseDict();
-    // 3. 延迟1.5秒后预加载常见字母分片（覆盖80%+查询）
-    setTimeout(() => {
-        const commonLetters = ['a', 's', 'c', 'b', 'p', 'm', 'd', 'e', 'f', 't', 'r', 'h', 'i', 'l', 'n', 'o', 'w', 'u'];
-        commonLetters.forEach(letter => {
-            isChunkLoaded(letter).then(loaded => {
-                if (!loaded) loadChunk(letter).catch(() => {});
-            });
-        });
-    }, 1500);
+    // 3. 仅桌面端预加载字母分片（手机端并发连接有限，跳过避免阻塞查词）
+    const isMobile = window.innerWidth < 768 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (!isMobile) {
+        setTimeout(() => {
+            // 逐个加载，避免占满浏览器连接池
+            const commonLetters = ['a', 's', 'c', 'b', 'p', 'm'];
+            commonLetters.reduce((promise, letter) => {
+                return promise.then(() => isChunkLoaded(letter)).then(loaded => {
+                    if (!loaded) return loadChunk(letter).catch(() => {});
+                });
+            }, Promise.resolve());
+        }, 2000);
+    }
 });
 
 // 键盘快捷键
