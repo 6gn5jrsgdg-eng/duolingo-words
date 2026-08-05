@@ -2596,17 +2596,17 @@ async function enrichInBackground(word, parentSignal, result) {
         } catch (e) { return null; }
     })();
 
-    // 等例句生成（用户最关心），整体最多等 8 秒
-    const exampleTimeout = new Promise(resolve => setTimeout(() => resolve(null), 8000));
+    // 等例句生成（用户最关心），整体最多等 6 秒
+    const exampleTimeout = new Promise(resolve => setTimeout(() => resolve(null), 6000));
     const generated = await Promise.race([examplePromise, exampleTimeout]);
 
     if (generated && generated.length > 0) {
         result.examples = generated;
-    } else if (result.definitions && result.definitions.length > 0) {
-        // 后备方案：API 失败时，用 ECDICT 英文释义 + 中文翻译构造简单例句
-        const def = result.definitions[0].definition;
-        if (def && def.length > 5) {
-            result.examples = [def + '\n' + (result.translation || '')];
+    } else {
+        // API 失败/超时：使用本地后备方案（从ECDICT获取释义或模板构造）
+        const localExamples = await buildLocalExamples(word, result.translation);
+        if (localExamples && localExamples.length > 0) {
+            result.examples = localExamples;
         }
     }
     result.examplesLoading = false;
@@ -2854,12 +2854,14 @@ async function generateExamples(word, translation, signal) {
         ];
     }
 
-    // 并行翻译所有模板，每个请求 6 秒超时
+    // 并行翻译所有模板，每个请求 5 秒超时（用 AbortController 强制中断）
     const results = await Promise.all(templates.map(async (enSentence) => {
         try {
             const url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(enSentence) + '&langpair=en|zh';
-            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 6000));
-            const resp = await Promise.race([fetch(url, { signal }), timeout]);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000);
+            const resp = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeoutId);
             if (resp.ok) {
                 const data = await resp.json();
                 if (data && data.responseData && data.responseData.translatedText) {
@@ -2874,6 +2876,52 @@ async function generateExamples(word, translation, signal) {
     }));
 
     const examples = results.filter(r => r !== null);
+    return examples.length > 0 ? examples : null;
+}
+
+// 本地构造例句（无需任何外部API，完全离线可用）
+// 方案：从 IndexedDB ECDICT 获取英文释义 → 模板构造
+async function buildLocalExamples(word, translation) {
+    const wordLower = word.toLowerCase();
+    const examples = [];
+
+    // 1. 尝试从 IndexedDB 获取 ECDICT 英文释义
+    try {
+        const firstChar = wordLower[0];
+        if (/^[a-z]$/.test(firstChar)) {
+            if (!(await isChunkLoaded(firstChar))) {
+                await loadChunk(firstChar);
+            }
+            const dbResult = await queryDictDB(wordLower);
+            if (dbResult && dbResult.d) {
+                // 取第一行英文释义作为例句
+                const firstDef = dbResult.d.split('\\n')[0].trim();
+                if (firstDef.length > 3) {
+                    const zh = translation || dbResult.t || '';
+                    examples.push(firstDef + '\n' + zh);
+                }
+            }
+        }
+    } catch (e) { /* 忽略 IndexedDB 错误 */ }
+
+    // 2. 如果没有释义，用模板构造简单双语例句
+    if (examples.length === 0 && translation) {
+        const cleanTrans = translation.replace(/^(n|v|vi|vt|adj|adv|prep|conj|pron|art|num|abbr|int|aux)\.\s*/, '').split(/[;,，；]/)[0].trim();
+        const isNoun = /^n\./.test(translation);
+        const isVerb = /^(v|vi|vt)\./.test(translation);
+        const isAdj = /^adj\./.test(translation);
+
+        if (isNoun) {
+            examples.push('I have a ' + word + '.\n我有一个' + cleanTrans + '。');
+        } else if (isVerb) {
+            examples.push('I ' + word + ' every day.\n我每天' + cleanTrans + '。');
+        } else if (isAdj) {
+            examples.push('This is very ' + word + '.\n这非常' + cleanTrans + '。');
+        } else {
+            examples.push('The word "' + word + '" means ' + cleanTrans + '.\n"' + word + '"的意思是' + cleanTrans + '。');
+        }
+    }
+
     return examples.length > 0 ? examples : null;
 }
 
