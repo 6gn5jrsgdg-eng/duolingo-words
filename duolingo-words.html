@@ -2344,14 +2344,14 @@ document.getElementById('wordInput').addEventListener('input', function(e) {
 
     if (hasChinese) {
         // 中文输入：反查英文单词
-        dictLookupTimer = setTimeout(() => lookupByChinese(word), 400);
+        dictLookupTimer = setTimeout(() => lookupByChinese(word), 200);
     } else if (hasEnglish && word.length >= 2) {
         // 英文输入：查英汉词典
         if (!/^[a-zA-Z\-'\s]+$/.test(word)) {
             hideDictHint();
             return;
         }
-        dictLookupTimer = setTimeout(() => lookupWord(word), 300);
+        dictLookupTimer = setTimeout(() => lookupWord(word), 150);
     } else {
         hideDictHint();
     }
@@ -2385,16 +2385,17 @@ async function lookupByChinese(query) {
     dictLookupController = new AbortController();
     const signal = dictLookupController.signal;
 
-    showDictHint('loading', '正在查找 "' + query + '"...');
+    // 延迟显示加载提示：快速查询不会看到闪烁
+    const hintTimer = setTimeout(() => showDictHint('loading', '正在查找 "' + query + '"...'), 200);
 
     try {
         // 阶段1: 查本地迷你反查词典（即时返回）
-        // 如果词典还在加载中，等待最多 5 秒
+        // 词典已在页面加载时预加载，通常立即可用
         let dict = miniReverseDict;
         if (!dict) {
             dict = await Promise.race([
                 loadMiniReverseDict(),
-                new Promise(resolve => setTimeout(() => resolve(null), 5000))
+                new Promise(resolve => setTimeout(() => resolve(null), 2000))
             ]);
         }
         let results = [];
@@ -2423,13 +2424,15 @@ async function lookupByChinese(query) {
         }
 
         if (results.length > 0) {
+            clearTimeout(hintTimer);
             showChineseSearchResult(results);
             return;
         }
 
         // 阶段2: 本地词典没找到，尝试 MyMemory API
+        clearTimeout(hintTimer);
         showDictHint('loading', '正在翻译 "' + query + '"...');
-        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 8000));
+        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
         const url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(query) + '&langpair=zh|en';
         const resp = await Promise.race([fetch(url, { signal }), timeout]);
         if (!resp.ok) {
@@ -2449,6 +2452,7 @@ async function lookupByChinese(query) {
         results = words.slice(0, 5).map(w => ({ word: w, translation: query, phonetic: '' }));
         showChineseSearchResult(results);
     } catch (err) {
+        clearTimeout(hintTimer);
         if (err.name !== 'AbortError') {
             if (err.message === 'timeout') {
                 showDictHint('error', '翻译超时，请重试');
@@ -2496,15 +2500,17 @@ async function lookupWord(word) {
     dictLookupController = new AbortController();
     const signal = dictLookupController.signal;
 
-    showDictHint('loading', '');
+    // 延迟显示加载提示：快速查询（<200ms）不会看到闪烁
+    const hintTimer = setTimeout(() => showDictHint('loading', ''), 200);
 
     try {
         // === 第一阶段：快速查找（常用词典 + IndexedDB）===
         const fastResult = await fetchTranslate(word, signal);
+        clearTimeout(hintTimer);
 
         if (fastResult && fastResult.translation) {
             // IndexedDB/常用词典命中，立即生成本地例句并显示
-            const localExamples = await buildLocalExamples(word, fastResult.translation);
+            const localExamples = await buildLocalExamples(word, fastResult.translation, fastResult.definition);
             const result = {
                 word: word,
                 translation: fastResult.translation,
@@ -2523,9 +2529,10 @@ async function lookupWord(word) {
             return;
         }
 
-        // === 第三阶段：IndexedDB 未命中，快速尝试在线API（3秒超时）===
+        // === 第三阶段：IndexedDB 未命中，快速尝试在线API（2秒超时）===
+        showDictHint('loading', '');
         const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('timeout')), 3000)
+            setTimeout(() => reject(new Error('timeout')), 2000)
         );
 
         const [dictResult, examplesResult] = await Promise.allSettled([
@@ -2568,6 +2575,7 @@ async function lookupWord(word) {
         lastDictResult = result;
         showDictResult(result);
     } catch (err) {
+        clearTimeout(hintTimer);
         if (err.name !== 'AbortError') {
             showDictHint('error', '查询失败，请稍后重试');
         }
@@ -2591,14 +2599,14 @@ async function enrichInBackground(word, parentSignal, result) {
     const dictPromise = (async () => {
         try {
             const shortTimeout = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('timeout')), 5000)
+                setTimeout(() => reject(new Error('timeout')), 3000)
             );
             return await Promise.race([fetchDictEnglish(word, enrichController.signal), shortTimeout]);
         } catch (e) { return null; }
     })();
 
     // 等API例句，最多 6 秒
-    const exampleTimeout = new Promise(resolve => setTimeout(() => resolve(null), 6000));
+    const exampleTimeout = new Promise(resolve => setTimeout(() => resolve(null), 4000));
     const generated = await Promise.race([examplePromise, exampleTimeout]);
 
     // API成功 → 替换为更好的例句；API失败 → 保留已有的本地例句
@@ -2788,7 +2796,7 @@ async function fetchTranslate(word, signal) {
     // 线上：直接调用 MyMemory 句子翻译（3秒超时，被墙时快速失败）
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
         const sentence = "The meaning of the word '" + word + "' is";
         const url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(sentence) + '&langpair=en|zh';
         const resp = await fetch(url, { signal: controller.signal });
@@ -2858,7 +2866,7 @@ async function generateExamples(word, translation, signal) {
         try {
             const url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(enSentence) + '&langpair=en|zh';
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000);
+            const timeoutId = setTimeout(() => controller.abort(), 3000);
             const resp = await fetch(url, { signal: controller.signal });
             clearTimeout(timeoutId);
             if (resp.ok) {
@@ -2879,30 +2887,41 @@ async function generateExamples(word, translation, signal) {
 }
 
 // 本地构造例句（无需任何外部API，完全离线可用）
-// 方案：从 IndexedDB ECDICT 获取英文释义 → 模板构造
-async function buildLocalExamples(word, translation) {
+// 方案：优先使用已获取的英文释义 → IndexedDB ECDICT → 模板构造
+async function buildLocalExamples(word, translation, definition) {
     const wordLower = word.toLowerCase();
     const examples = [];
 
-    // 1. 尝试从 IndexedDB 获取 ECDICT 英文释义
-    try {
-        const firstChar = wordLower[0];
-        if (/^[a-z]$/.test(firstChar)) {
-            if (!(await isChunkLoaded(firstChar))) {
-                await loadChunk(firstChar);
-            }
-            const dbResult = await queryDictDB(wordLower);
-            if (dbResult && dbResult.d) {
-                const firstDef = dbResult.d.split('\n')[0].trim();
-                if (firstDef.length > 3) {
-                    const zh = translation || dbResult.t || '';
-                    examples.push(firstDef + '\n' + zh);
+    // 1. 优先使用已获取的英文释义（避免重复查询 IndexedDB）
+    if (definition) {
+        const firstDef = definition.split('\n')[0].trim();
+        if (firstDef.length > 3) {
+            const zh = translation || '';
+            examples.push(firstDef + '\n' + zh);
+        }
+    }
+
+    // 2. 如果没有释义，尝试从 IndexedDB 获取
+    if (examples.length === 0) {
+        try {
+            const firstChar = wordLower[0];
+            if (/^[a-z]$/.test(firstChar)) {
+                if (!(await isChunkLoaded(firstChar))) {
+                    await loadChunk(firstChar);
+                }
+                const dbResult = await queryDictDB(wordLower);
+                if (dbResult && dbResult.d) {
+                    const firstDef = dbResult.d.split('\n')[0].trim();
+                    if (firstDef.length > 3) {
+                        const zh = translation || dbResult.t || '';
+                        examples.push(firstDef + '\n' + zh);
+                    }
                 }
             }
-        }
-    } catch (e) { /* 忽略 IndexedDB 错误 */ }
+        } catch (e) { /* 忽略 IndexedDB 错误 */ }
+    }
 
-    // 2. 如果没有释义，用模板构造简单双语例句
+    // 3. 如果没有释义，用模板构造简单双语例句
     if (examples.length === 0 && translation) {
         const cleanTrans = translation.replace(/^(n|v|vi|vt|adj|adv|prep|conj|pron|art|num|abbr|int|aux)\.\s*/, '').split(/[;,，；]/)[0].trim();
         const isNoun = /^n\./.test(translation);
@@ -3041,7 +3060,8 @@ function showDictHint(type, message) {
     const hint = document.getElementById('dictHint');
     if (type === 'loading') {
         hint.className = 'dict-hint show';
-        hint.innerHTML = '<span class="dict-spinner"></span> 正在查询词典...';
+        const msg = message || '正在查询词典...';
+        hint.innerHTML = '<span class="dict-spinner"></span> ' + msg;
     } else if (type === 'error') {
         hint.className = 'dict-hint show error';
         hint.innerHTML = '❌ ' + message;
@@ -3120,6 +3140,23 @@ renderToday();
 renderWordbook();
 renderReviewStats();
 renderStats();
+
+// 预加载词典资源（不阻塞页面渲染，大幅提升首次查词速度）
+window.addEventListener('load', () => {
+    // 1. 预加载常用词典（455词，即时返回）
+    loadEmbeddedDict();
+    // 2. 预加载中文反查词典（396KB，18372词条）
+    loadMiniReverseDict();
+    // 3. 延迟1.5秒后预加载常见字母分片（覆盖80%+查询）
+    setTimeout(() => {
+        const commonLetters = ['a', 's', 'c', 'b', 'p', 'm', 'd', 'e', 'f', 't', 'r', 'h', 'i', 'l', 'n', 'o', 'w', 'u'];
+        commonLetters.forEach(letter => {
+            isChunkLoaded(letter).then(loaded => {
+                if (!loaded) loadChunk(letter).catch(() => {});
+            });
+        });
+    }, 1500);
+});
 
 // 键盘快捷键
 document.addEventListener('keydown', function(e) {
